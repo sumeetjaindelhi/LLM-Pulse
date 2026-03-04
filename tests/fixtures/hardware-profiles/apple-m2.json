@@ -1,0 +1,48 @@
+{
+  "cpu": {
+    "brand": "Apple M2 Pro",
+    "manufacturer": "Apple",
+    "cores": 12,
+    "threads": 12,
+    "speed": 3.5,
+    "speedMax": 3.5,
+    "architecture": "arm64",
+    "flags": [],
+    "hasAvx2": false
+  },
+  "gpus": [
+    {
+      "vendor": "Apple",
+      "model": "Apple M2 Pro",
+      "vramMb": 16384,
+      "driverVersion": "",
+      "cudaVersion": null,
+      "utilizationPercent": null,
+      "temperatureCelsius": null,
+      "vramUsedMb": null
+    }
+  ],
+  "memory": {
+    "totalMb": 16384,
+    "availableMb": 10000,
+    "usedMb": 6384,
+    "usedPercent": 39,
+    "type": "LPDDR5",
+    "speedMhz": 6400
+  },
+  "disk": {
+    "type": "NVMe",
+    "freeGb": 350,
+    "totalGb": 512
+  },
+  "primaryGpu": {
+    "vendor": "Apple",
+    "model": "Apple M2 Pro",
+    "vramMb": 16384,
+    "driverVersion": "",
+    "cudaVersion": null,
+    "utilizationPercent": null,
+    "temperatureCelsius": null,
+    "vramUsedMb": null
+  }
+}

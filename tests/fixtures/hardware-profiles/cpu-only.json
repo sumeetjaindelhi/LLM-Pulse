@@ -1,0 +1,28 @@
+{
+  "cpu": {
+    "brand": "Intel Core i5-10400",
+    "manufacturer": "Intel",
+    "cores": 6,
+    "threads": 12,
+    "speed": 2.9,
+    "speedMax": 4.3,
+    "architecture": "x64",
+    "flags": ["avx", "avx2"],
+    "hasAvx2": true
+  },
+  "gpus": [],
+  "memory": {
+    "totalMb": 16384,
+    "availableMb": 10000,
+    "usedMb": 6384,
+    "usedPercent": 39,
+    "type": "DDR4",
+    "speedMhz": 2666
+  },
+  "disk": {
+    "type": "SSD",
+    "freeGb": 120,
+    "totalGb": 500
+  },
+  "primaryGpu": null
+}
