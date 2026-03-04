@@ -7,26 +7,43 @@
   "bin": {
     "llm-pulse": "dist/bin/llm-pulse.js"
   },
+  "files": [
+    "dist/",
+    "data/"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/bin/llm-pulse.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
     "llm",
     "gpu",
+    "vram",
     "monitoring",
     "hardware",
     "ollama",
     "llama",
+    "inference",
     "ai",
-    "cli"
+    "cli",
+    "terminal",
+    "tui"
   ],
-  "author": "",
+  "author": "sumeetjaindelhi",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sumeetjaindelhi/LLM-Pulse.git"
+  },
+  "homepage": "https://github.com/sumeetjaindelhi/LLM-Pulse#readme",
+  "bugs": {
+    "url": "https://github.com/sumeetjaindelhi/LLM-Pulse/issues"
+  },
   "dependencies": {
     "boxen": "^8.0.1",
     "chalk": "^5.4.1",

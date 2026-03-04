@@ -122,6 +122,45 @@ export interface HealthReport {
   topSuggestion: string | null;
 }
 
+// ── Monitor ──────────────────────────────────
+
+export type MonitorTab = "overview" | "inference" | "vram";
+
+export interface ModelUsage {
+  name: string; // e.g. "llama3.1:8b"
+  avgTokPerSec: number;
+  totalTokens: number;
+  totalTimeMs: number;
+  requests: number;
+  startedAt: number; // Date.now()
+}
+
+export interface SessionStats {
+  totalTokens: number;
+  totalTimeMs: number;
+  totalRequests: number;
+  startedAt: number; // session start timestamp
+  modelHistory: Map<string, ModelUsage>;
+  lastModelSwapAt: number | null;
+}
+
+export interface VramBreakdown {
+  totalMb: number;
+  usedMb: number;
+  freeMb: number;
+  modelWeightsMb: number; // from model database
+  kvCacheMb: number; // estimated from context
+  overheadMb: number; // usedMb - weights - kvCache
+}
+
+export type AlertSeverity = "warning" | "info" | "success";
+
+export interface SmartAlert {
+  severity: AlertSeverity;
+  icon: string; // ⚠ ✓ ℹ
+  message: string;
+}
+
 // ── CLI Options ───────────────────────────────
 
 export type OutputFormat = "table" | "json";

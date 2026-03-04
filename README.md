@@ -131,23 +131,68 @@ llm-pulse models --fits --format json # JSON output
 
 ### `llm-pulse monitor`
 
-Live-updating TUI dashboard. Like htop for LLMs.
+Live-updating TUI dashboard with 3 tabs. Like htop, but for LLMs.
+
+Press `Tab` to switch views, `q` to quit. Updates every second.
+
+**Tab 1 — Overview** (default): Hardware bars with sparkline trends, active model info, and smart alerts.
 
 ```
-$ llm-pulse monitor
+  LLM Pulse — Live Monitor          [Overview] Inference  VRAM
+  ─────────────────────────────────────────────────────────────
+  CPU  ████████████░░░░░░░░  62%  45°C     ▁▂▃▅▆▅▃▂▃▅
+  GPU  ██████████████░░░░░░  71%  68°C     ▃▅▆▇▇▆▅▆▇█
+  RAM  ████████░░░░░░░░░░░░  42%  13.8/32 GB
+  VRAM ██████████████░░░░░░  72%  7.2/10 GB
 
-  LLM Pulse — Live Monitor
-  ─────────────────────────────────────────────
-  CPU  ████████████░░░░░░░░  62%  45°C
-  GPU  ██████████████░░░░░░  71%  68°C  VRAM: 7.2/10.0 GB
-  RAM  ████████░░░░░░░░░░░░  42%        13.8/32.0 GB
+  Model: llama3.1:8b (Q4_K_M · 5 GB)     Status: generating
+  Speed: 42.3 tok/s          Uptime: 12m 34s
 
-  Active: llama3.1:8b    42.3 tok/s
-  ─────────────────────────────────────────────
-  [q] quit
+  ⚠ VRAM at 72% — loading a 2nd model will cause swapping
+  ✓ Running 30% faster than average for RTX 3080 + 8B Q4
+  ─────────────────────────────────────────────────────────────
+  [Tab] switch view  [q] quit
 ```
 
-Updates every second. Shows active Ollama model and tokens/sec if running. Press `q` to quit.
+**Tab 2 — Inference**: Throughput chart over time, session stats, and per-model usage breakdown.
+
+```
+  Throughput (last 60s)
+   50 ┤                          ╭─╮
+   40 ┤      ╭──╮    ╭──╮   ╭──╯  ╰──╮
+   30 ┤  ╭──╯   ╰──╮╯   ╰─╯          ╰──
+   20 ┤──╯
+    0 ┤─────────────────────────────────── tok/s
+
+  Session Stats
+  Total tokens:     12,847     Avg tok/s: 38.2
+  Requests:         47         Uptime:    12m 34s
+
+  Model History (this session)
+  llama3.1:8b      38.2 tok/s  11m 20s  [████████████████░░░░]
+  phi3:mini        52.1 tok/s   1m 14s  [███░░░░░░░░░░░░░░░░░]
+```
+
+**Tab 3 — VRAM Map**: Visual VRAM breakdown showing what's using your GPU memory.
+
+```
+  VRAM Map — 10,240 MB Total
+  ████████████████████████████░░░░░░░░░░░░░░░░  72% used
+
+  Model weights   [████████████████]  4,800 MB  47%
+  KV Cache        [██████████]        2,100 MB  21%
+  CUDA overhead   [██]                  400 MB   4%
+  Free            [░░░░░░░░░░░░]      2,940 MB  29%
+
+  Power: 180W   Clock: 1920 MHz
+  Can still fit: Phi-3 Mini Q4 (2.5 GB)
+```
+
+**Smart alerts** provide LLM-specific insights no system monitor shows:
+- VRAM pressure warnings before swapping happens
+- Speed drop detection (thermal throttling, context overflow)
+- GPU underutilization during inference (CPU-bound model)
+- Performance comparison vs expected for your hardware
 
 ### `llm-pulse benchmark`
 
@@ -216,7 +261,7 @@ console.log(recs[0].pullCommand);           // "ollama pull qwen2.5-coder:14b"
 ## Development
 
 ```bash
-git clone <repo>
+git clone https://github.com/sumeetjaindelhi/LLM-Pulse.git
 cd llm-pulse
 npm install
 npm run build
