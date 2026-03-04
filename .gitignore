@@ -6,3 +6,5 @@ Thumbs.db
 .env
 *.log
 package-lock.json
+ARCHITECTURE.md
+CLAUDE.md

@@ -23,7 +23,9 @@ export async function detectOllama(): Promise<RuntimeInfo> {
 
   // Check if API is running and get version
   try {
-    const response = await fetch(`${OLLAMA_API_URL}/api/version`);
+    const response = await fetch(`${OLLAMA_API_URL}/api/version`, {
+      signal: AbortSignal.timeout(3000),
+    });
     if (response.ok) {
       const data = (await response.json()) as { version: string };
       info.version = data.version;
@@ -43,7 +45,9 @@ export async function detectOllama(): Promise<RuntimeInfo> {
 
   // Get installed models
   try {
-    const response = await fetch(`${OLLAMA_API_URL}/api/tags`);
+    const response = await fetch(`${OLLAMA_API_URL}/api/tags`, {
+      signal: AbortSignal.timeout(3000),
+    });
     if (response.ok) {
       const data = (await response.json()) as { models: Array<{ name: string }> };
       info.models = data.models.map((m) => m.name);

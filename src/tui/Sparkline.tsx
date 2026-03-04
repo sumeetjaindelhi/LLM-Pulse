@@ -22,7 +22,7 @@ export function Sparkline({ data, width = 10, color = "cyan" }: SparklineProps) 
   const range = max - min;
 
   const chars = slice.map((v) => {
-    if (range === 0) return BLOCKS[1]; // flat line
+    if (range === 0) return BLOCKS[4]; // flat line — mid-height block
     const idx = Math.round(((v - min) / range) * 7);
     return BLOCKS[Math.min(idx, 7)];
   });

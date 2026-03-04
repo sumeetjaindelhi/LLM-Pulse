@@ -18,6 +18,10 @@ export function runDiagnostics(
   if (hardware.cpu.hasAvx2) {
     checks.push({ label: "AVX2", severity: "pass", message: "CPU supports AVX2 — great for inference" });
     score += DOCTOR_WEIGHTS.avx2;
+  } else if (hardware.cpu.architecture === "arm64") {
+    // ARM CPUs (Apple Silicon, Snapdragon) use NEON instead of AVX2 — not a problem
+    checks.push({ label: "SIMD", severity: "pass", message: "ARM CPU with NEON — optimized for inference" });
+    score += DOCTOR_WEIGHTS.avx2;
   } else {
     checks.push({
       label: "AVX2",
@@ -142,8 +146,8 @@ export function runDiagnostics(
     if (running) {
       checks.push({ label: "Runtime", severity: "pass", message: `${running.name} installed and running` });
     } else {
-      const installed = runtimes.find((r) => r.status === "installed");
-      checks.push({ label: "Runtime", severity: "pass", message: `${installed!.name} installed` });
+      const installed = runtimes.find((r) => r.status !== "not_found");
+      checks.push({ label: "Runtime", severity: "pass", message: `${installed?.name ?? "Runtime"} installed` });
     }
     score += DOCTOR_WEIGHTS.runtimeInstalled;
   } else {

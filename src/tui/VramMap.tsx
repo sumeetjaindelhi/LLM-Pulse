@@ -110,7 +110,7 @@ export function VramMap({ snapshot }: VramMapProps) {
 
   return (
     <Box flexDirection="column">
-      <Text bold dimColor>{`  VRAM Map \u2014 ${(breakdown.totalMb / 1024).toFixed(0).toLocaleString()} MB Total`}</Text>
+      <Text bold dimColor>{`  VRAM Map \u2014 ${breakdown.totalMb.toLocaleString()} MB Total`}</Text>
       <Text dimColor>{"  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"}</Text>
 
       <Text>{""}</Text>

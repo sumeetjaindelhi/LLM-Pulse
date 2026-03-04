@@ -12,7 +12,7 @@ export async function detectDisk(): Promise<DiskInfo> {
     const name = (primaryDisk.name || "").toLowerCase();
     if (iface.includes("nvme") || name.includes("nvme")) {
       type = "NVMe";
-    } else if (primaryDisk.type === "SSD" || iface.includes("sata") && primaryDisk.type !== "HD") {
+    } else if (primaryDisk.type === "SSD" || (iface.includes("sata") && primaryDisk.type !== "HD")) {
       type = "SSD";
     } else if (primaryDisk.type === "HD") {
       type = "HDD";

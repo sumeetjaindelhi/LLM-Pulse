@@ -9,6 +9,7 @@ import type {
 } from "../core/types.js";
 
 export function classifyFit(availableVramMb: number, requiredVramMb: number): FitLevel {
+  if (requiredVramMb <= 0) return "excellent";
   const ratio = availableVramMb / requiredVramMb;
   if (ratio >= FIT_THRESHOLDS.excellent) return "excellent";
   if (ratio >= FIT_THRESHOLDS.comfortable) return "comfortable";

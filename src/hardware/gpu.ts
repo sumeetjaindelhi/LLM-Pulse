@@ -33,11 +33,15 @@ async function parseNvidiaSmi(): Promise<NvidiaSmiResult | null> {
       .split(",")
       .map((s) => s.trim());
 
+    const vramTotalMb = parseInt(vramTotal, 10);
+    const vramUsedMb = parseInt(vramUsed, 10);
+    if (isNaN(vramTotalMb) || isNaN(vramUsedMb)) return null;
+
     return {
-      vramTotalMb: parseInt(vramTotal, 10),
-      vramUsedMb: parseInt(vramUsed, 10),
-      utilizationPercent: parseInt(utilization, 10),
-      temperatureCelsius: parseInt(temp, 10),
+      vramTotalMb,
+      vramUsedMb,
+      utilizationPercent: parseInt(utilization, 10) || 0,
+      temperatureCelsius: parseInt(temp, 10) || 0,
       driverVersion: driver,
       cudaVersion,
     };

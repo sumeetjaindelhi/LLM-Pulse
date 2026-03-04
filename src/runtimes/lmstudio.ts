@@ -25,7 +25,9 @@ export async function detectLmStudio(): Promise<RuntimeInfo> {
   // Check if LM Studio's local server is running
   if (info.status === "installed") {
     try {
-      const response = await fetch("http://127.0.0.1:1234/v1/models");
+      const response = await fetch("http://127.0.0.1:1234/v1/models", {
+        signal: AbortSignal.timeout(3000),
+      });
       if (response.ok) {
         info.status = "running";
         const data = (await response.json()) as { data: Array<{ id: string }> };
