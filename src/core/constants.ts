@@ -45,6 +45,8 @@ export const ALERT_THRESHOLDS = {
 // Expected tok/s baselines by GPU tier + model size (rough estimates)
 // Format: { [vramTierGb]: { [paramBillion]: expectedTokPerSec } }
 export const EXPECTED_TOK_PER_SEC: Record<string, Record<string, number>> = {
+  "4": { "3": 25, "7": 10 },
+  "6": { "3": 40, "7": 20, "8": 15 },
   "8": { "3": 60, "7": 35, "8": 30, "13": 15 },
   "10": { "3": 70, "7": 45, "8": 40, "13": 25 },
   "12": { "3": 80, "7": 50, "8": 45, "13": 30 },

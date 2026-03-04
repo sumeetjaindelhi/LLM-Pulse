@@ -69,7 +69,7 @@ export function runDiagnostics(
   }
 
   if (gpu && gpu.driverVersion) {
-    const driverMajor = parseInt(gpu.driverVersion.split(".")[0], 10);
+    const driverMajor = parseInt(gpu.driverVersion.split(".")[0], 10) || 0;
     if (gpu.vendor === "NVIDIA" && driverMajor < 550) {
       checks.push({
         label: "GPU Driver",

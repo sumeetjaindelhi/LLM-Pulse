@@ -197,11 +197,17 @@ export class HardwareMonitor extends EventEmitter {
         "--format=csv,noheader,nounits",
       ]);
       const parts = stdout.trim().split(",").map((s) => s.trim());
+      const percent = parseInt(parts[0], 10);
+      const vramUsedMb = parseInt(parts[2], 10);
+      const vramTotalMb = parseInt(parts[3], 10);
+      if (isNaN(percent) || isNaN(vramUsedMb) || isNaN(vramTotalMb)) {
+        return { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null };
+      }
       return {
-        percent: parseInt(parts[0], 10),
-        temp: parseInt(parts[1], 10),
-        vramUsedMb: parseInt(parts[2], 10),
-        vramTotalMb: parseInt(parts[3], 10),
+        percent,
+        temp: parseInt(parts[1], 10) || null,
+        vramUsedMb,
+        vramTotalMb,
         powerWatt: parseFloat(parts[4]) || null,
         clockMhz: parseInt(parts[5], 10) || null,
       };
