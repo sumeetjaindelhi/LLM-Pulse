@@ -73,6 +73,23 @@ export interface ModelEntry {
   releaseDate: string; // YYYY-MM
 }
 
+// ── Ollama Live Models ───────────────────────
+
+export interface OllamaModel {
+  name: string; // "llama3.1:8b"
+  size: number; // bytes (file size on disk)
+  parameterSize: string; // "8.0B" from details
+  quantization: string; // "Q4_K_M" from details
+  family: string; // "llama" from details
+}
+
+export interface MergedModel {
+  entry: ModelEntry | null; // from DB (null if Ollama-only)
+  ollamaModel: OllamaModel | null; // from Ollama (null if DB-only)
+  installed: boolean; // true if found in Ollama
+  ollamaTag: string | null; // the tag used in Ollama
+}
+
 // ── Scoring ───────────────────────────────────
 
 export type FitLevel = "excellent" | "comfortable" | "tight" | "barely" | "cannot_run";

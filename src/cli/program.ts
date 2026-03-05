@@ -65,12 +65,16 @@ export function createProgram(): Command {
     .option("-s, --search <query>", "Search models by name")
     .option("-c, --category <category>", "Filter by category", "all")
     .option("--fits", "Only show models that fit your hardware", false)
+    .option("--live", "Include live models from Ollama", false)
+    .option("--installed", "Show only installed Ollama models", false)
     .option("-f, --format <format>", "Output format (table or json)", "table")
     .action(async (opts) => {
       await modelsCommand({
         search: opts.search,
         category: opts.category as ModelCategory | "all",
         fits: opts.fits,
+        live: opts.live || opts.installed,
+        installed: opts.installed,
         format: opts.format,
       });
     });

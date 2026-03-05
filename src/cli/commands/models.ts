@@ -1,21 +1,28 @@
 import ora from "ora";
 import Table from "cli-table3";
 import { getAllModels, searchModels, filterByCategory } from "../../models/database.js";
+import { getMergedModels } from "../../models/merged-models.js";
 import { detectHardware } from "../../hardware/index.js";
 import { scoreModel } from "../../analysis/scorer.js";
 import { theme } from "../ui/colors.js";
 import { fitBadge } from "../ui/badges.js";
 import { sectionHeader } from "../ui/boxes.js";
-import type { ModelEntry, ModelCategory, HardwareProfile } from "../../core/types.js";
+import type { ModelEntry, ModelCategory, HardwareProfile, MergedModel } from "../../core/types.js";
 
 interface ModelsOptions {
   search?: string;
   category: ModelCategory | "all";
   fits: boolean;
+  live: boolean;
+  installed: boolean;
   format: string;
 }
 
 export async function modelsCommand(options: ModelsOptions): Promise<void> {
+  if (options.live) {
+    return liveModelsCommand(options);
+  }
+
   let models: ModelEntry[];
 
   // Filter by search or category
@@ -129,6 +136,127 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
       theme.number(`${vramGb} GB`),
       s.fitLabel,
       theme.muted(s.model.categories.join(", ")),
+    ]);
+  }
+
+  console.log(table.toString());
+  console.log();
+}
+
+async function liveModelsCommand(options: ModelsOptions): Promise<void> {
+  const spinner = ora({ text: "Fetching models from Ollama...", color: "cyan" }).start();
+
+  let merged: MergedModel[];
+  let hardware: HardwareProfile | null = null;
+
+  if (options.fits) {
+    [merged, hardware] = await Promise.all([getMergedModels(), detectHardware()]);
+  } else {
+    merged = await getMergedModels();
+  }
+
+  spinner.succeed("Models fetched");
+
+  // Apply filters
+  if (options.installed) {
+    merged = merged.filter((m) => m.installed);
+  }
+  if (options.search) {
+    const q = options.search.toLowerCase();
+    merged = merged.filter((m) => {
+      const name = m.entry?.name ?? m.ollamaModel?.name ?? "";
+      const provider = m.entry?.provider ?? "";
+      return name.toLowerCase().includes(q) || provider.toLowerCase().includes(q);
+    });
+  }
+  if (options.category !== "all") {
+    merged = merged.filter((m) => m.entry?.categories.includes(options.category as ModelCategory));
+  }
+
+  if (options.format === "json") {
+    const output = merged.map((m) => ({
+      name: m.entry?.name ?? m.ollamaModel?.name ?? "",
+      ollamaTag: m.ollamaTag,
+      installed: m.installed,
+      provider: m.entry?.provider ?? null,
+      parametersBillion: m.entry?.parametersBillion ?? null,
+      parameterSize: m.ollamaModel?.parameterSize ?? null,
+      quantization: m.ollamaModel?.quantization ?? null,
+      family: m.ollamaModel?.family ?? null,
+      sizeBytes: m.ollamaModel?.size ?? null,
+    }));
+    console.log(JSON.stringify(output, null, 2));
+    return;
+  }
+
+  const label = options.installed ? "Installed Models" : "All Models (Live)";
+  console.log(sectionHeader(`${label} (${merged.length} results)`));
+  console.log();
+
+  if (merged.length === 0) {
+    console.log(`  ${theme.warning("No models found.")}`);
+    console.log();
+    return;
+  }
+
+  const table = new Table({
+    head: [
+      theme.muted("Model"),
+      theme.muted("Provider"),
+      theme.muted("Params"),
+      theme.muted("Quant"),
+      theme.muted("Size"),
+      theme.muted("Fit"),
+      theme.muted("Installed"),
+    ],
+    style: { head: [], border: ["gray"], compact: true },
+    chars: {
+      top: "", "top-mid": "", "top-left": "", "top-right": "",
+      bottom: "", "bottom-mid": "", "bottom-left": "", "bottom-right": "",
+      left: "  ", "left-mid": "",
+      mid: "", "mid-mid": "",
+      right: "", "right-mid": "",
+      middle: "  ",
+    },
+  });
+
+  for (const m of merged) {
+    const name = m.entry?.name ?? m.ollamaModel?.name ?? "—";
+    const provider = m.entry?.provider ?? m.ollamaModel?.family ?? "—";
+    const params = m.entry
+      ? `${m.entry.parametersBillion}B`
+      : m.ollamaModel?.parameterSize ?? "—";
+    const quant = m.ollamaModel?.quantization
+      ?? m.entry?.quantizations[0]?.name
+      ?? "—";
+    const sizeGb = m.ollamaModel
+      ? `${(m.ollamaModel.size / 1024 / 1024 / 1024).toFixed(1)} GB`
+      : "—";
+
+    // Fit label: score if DB entry + hardware, "unrated" if Ollama-only
+    let fitLabel: string;
+    if (m.entry && hardware) {
+      const scores = m.entry.quantizations
+        .map((q) => scoreModel(m.entry!, q, hardware!, options.category))
+        .filter((s) => !options.fits || s.fitLevel !== "cannot_run")
+        .sort((a, b) => b.compositeScore - a.compositeScore);
+      fitLabel = scores.length > 0 ? fitBadge(scores[0].fitLevel) : theme.fail("✗");
+    } else if (!m.entry) {
+      fitLabel = theme.muted("unrated");
+    } else {
+      fitLabel = theme.muted("—");
+    }
+
+    const installedIcon = m.installed ? theme.pass("✓") : theme.muted("—");
+
+    table.push([
+      theme.value(name),
+      theme.muted(provider),
+      theme.number(params),
+      theme.muted(quant),
+      theme.number(sizeGb),
+      fitLabel,
+      installedIcon,
     ]);
   }
 

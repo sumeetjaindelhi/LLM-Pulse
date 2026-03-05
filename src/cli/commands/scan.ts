@@ -1,6 +1,7 @@
 import ora from "ora";
 import { detectHardware } from "../../hardware/index.js";
 import { detectAllRuntimes } from "../../runtimes/index.js";
+import { fetchOllamaModels } from "../../models/ollama-models.js";
 import { getRecommendations } from "../../analysis/recommender.js";
 import { titleBox, sectionHeader, keyValue, subLine } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
@@ -16,12 +17,15 @@ export async function scanCommand(options: ScanOptions): Promise<void> {
 
   const spinner = ora({ text: "Scanning hardware...", color: "cyan" }).start();
 
-  const [hardware, runtimes] = await Promise.all([
+  const [hardware, runtimes, ollamaModels] = await Promise.all([
     detectHardware(),
     detectAllRuntimes(),
+    fetchOllamaModels(),
   ]);
 
   spinner.succeed("Scan complete");
+
+  const installedTags = new Set(ollamaModels.map((m) => m.name));
 
   const recommendations = getRecommendations(hardware, {
     category: options.category,
@@ -51,11 +55,14 @@ export async function scanCommand(options: ScanOptions): Promise<void> {
   lines.push(sectionHeader("Recommended Models for Your Hardware"));
   lines.push("");
   if (recommendations.length > 0) {
-    lines.push(recommendationTable(recommendations));
+    lines.push(recommendationTable(recommendations, installedTags));
     lines.push("");
-    const topCmd = recommendations[0].pullCommand;
-    if (topCmd) {
-      lines.push(`  Run: ${theme.command(topCmd)}`);
+    const top = recommendations[0];
+    const topTag = top.score.model.ollamaTag;
+    if (topTag && installedTags.has(topTag)) {
+      lines.push(`  ${theme.pass("●")} Top pick already installed: ${theme.command(`ollama run ${topTag}`)}`);
+    } else if (top.pullCommand) {
+      lines.push(`  Run: ${theme.command(top.pullCommand)}`);
     }
   } else {
     lines.push(`  ${theme.warning("No models fit your hardware with current filters.")}`);
