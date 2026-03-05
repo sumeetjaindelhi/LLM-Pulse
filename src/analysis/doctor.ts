@@ -1,4 +1,4 @@
-import { MIN_REQUIREMENTS, DOCTOR_WEIGHTS } from "../core/constants.js";
+import { MIN_REQUIREMENTS, DOCTOR_WEIGHTS, APPLE_UNIFIED_MEMORY_FACTOR } from "../core/constants.js";
 import type {
   HardwareProfile,
   RuntimeInfo,
@@ -65,6 +65,26 @@ export function runDiagnostics(
       severity: "warning",
       message: "No dedicated GPU detected — models will run on CPU",
       suggestion: "A GPU with 6+ GB VRAM dramatically speeds up inference.",
+    });
+  }
+
+  // Apple Silicon unified memory info
+  if (gpu && gpu.vendor === "Apple") {
+    const usableGb = Math.round((gpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR) / 1024);
+    checks.push({
+      label: "Unified Memory",
+      severity: "info",
+      message: `Apple Silicon unified memory — ~${usableGb} GB usable for inference (75% of ${Math.round(gpu.vramMb / 1024)} GB)`,
+    });
+  }
+
+  // AMD ROCm availability check
+  if (gpu && gpu.vendor === "AMD" && !gpu.acceleratorVersion) {
+    checks.push({
+      label: "ROCm",
+      severity: "warning",
+      message: "AMD GPU detected but rocm-smi not found — VRAM monitoring unavailable",
+      suggestion: "Install ROCm to enable GPU monitoring: https://rocm.docs.amd.com",
     });
   }
 

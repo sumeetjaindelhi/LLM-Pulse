@@ -4,7 +4,11 @@ import { detectMemory } from "./memory.js";
 import { detectDisk } from "./disk.js";
 import type { HardwareProfile } from "../core/types.js";
 
+let cachedProfile: HardwareProfile | null = null;
+
 export async function detectHardware(): Promise<HardwareProfile> {
+  if (cachedProfile) return cachedProfile;
+
   const [cpu, gpus, memory, disk] = await Promise.all([
     detectCpu(),
     detectGpus(),
@@ -18,7 +22,12 @@ export async function detectHardware(): Promise<HardwareProfile> {
       ? gpus.reduce((best, g) => (g.vramMb > best.vramMb ? g : best))
       : null;
 
-  return { cpu, gpus, memory, disk, primaryGpu };
+  cachedProfile = { cpu, gpus, memory, disk, primaryGpu };
+  return cachedProfile;
+}
+
+export function clearHardwareCache(): void {
+  cachedProfile = null;
 }
 
 export { detectCpu } from "./cpu.js";

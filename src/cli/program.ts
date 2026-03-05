@@ -3,7 +3,6 @@ import { VERSION } from "../core/constants.js";
 import { scanCommand } from "./commands/scan.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { modelsCommand } from "./commands/models.js";
-import { monitorCommand } from "./commands/monitor.js";
 import { benchmarkCommand } from "./commands/benchmark.js";
 import type { ScanOptions, ModelCategory, OutputFormat } from "../core/types.js";
 
@@ -84,6 +83,7 @@ export function createProgram(): Command {
     .command("monitor")
     .description("Live-updating system monitor (like htop for LLMs)")
     .action(async () => {
+      const { monitorCommand } = await import("./commands/monitor.js");
       await monitorCommand();
     });
 

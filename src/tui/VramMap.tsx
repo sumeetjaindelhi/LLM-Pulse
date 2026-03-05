@@ -97,10 +97,15 @@ function renderSegmentedBar(breakdown: VramBreakdown, width: number = 44): strin
 export function VramMap({ snapshot }: VramMapProps) {
   const breakdown = estimateVramBreakdown(snapshot);
 
+  const overheadLabel = snapshot.gpuVendor === "NVIDIA" ? "CUDA overhead"
+    : snapshot.gpuVendor === "Apple" ? "Metal overhead"
+    : snapshot.gpuVendor === "AMD" ? "ROCm overhead"
+    : "GPU overhead";
+
   if (!breakdown) {
     return (
       <Box flexDirection="column">
-        <Text dimColor>{"  No VRAM data available (no NVIDIA GPU detected)"}</Text>
+        <Text dimColor>{"  No VRAM data available (no supported GPU detected)"}</Text>
       </Box>
     );
   }
@@ -145,7 +150,7 @@ export function VramMap({ snapshot }: VramMapProps) {
 
       {breakdown.overheadMb > 0 && (
         <Text>
-          <Text dimColor>{"  CUDA overhead   "}</Text>
+          <Text dimColor>{`  ${overheadLabel.padEnd(16)}`}</Text>
           <Text color="gray">{"[\u2592".padEnd(Math.max(1, Math.round((breakdown.overheadMb / breakdown.totalMb) * 16)) + 1, "\u2592") + "]"}</Text>
           <Text dimColor>{`  ${breakdown.overheadMb.toLocaleString().padStart(7)} MB  ${Math.round((breakdown.overheadMb / breakdown.totalMb) * 100).toString().padStart(2)}%`}</Text>
         </Text>

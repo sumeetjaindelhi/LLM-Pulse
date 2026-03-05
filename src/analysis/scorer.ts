@@ -1,4 +1,4 @@
-import { FIT_THRESHOLDS } from "../core/constants.js";
+import { FIT_THRESHOLDS, APPLE_UNIFIED_MEMORY_FACTOR } from "../core/constants.js";
 import type {
   HardwareProfile,
   ModelEntry,
@@ -56,9 +56,15 @@ export function scoreModel(
   category: ModelCategory | "all" = "all",
 ): ModelScore {
   // Use GPU VRAM if available, otherwise use RAM (CPU inference)
-  const availableVramMb = hardware.primaryGpu
-    ? hardware.primaryGpu.vramMb
-    : hardware.memory.availableMb;
+  // Apple Silicon uses unified memory — apply 75% discount (OS + apps consume ~25%)
+  let availableVramMb: number;
+  if (hardware.primaryGpu) {
+    availableVramMb = hardware.primaryGpu.vendor === "Apple"
+      ? Math.round(hardware.primaryGpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR)
+      : hardware.primaryGpu.vramMb;
+  } else {
+    availableVramMb = hardware.memory.availableMb;
+  }
 
   const fitRatio = getFitRatio(availableVramMb, quant.vramMb);
   const fitLevel = classifyFit(availableVramMb, quant.vramMb);

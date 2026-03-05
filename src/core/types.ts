@@ -17,7 +17,8 @@ export interface GpuInfo {
   model: string;
   vramMb: number;
   driverVersion: string;
-  cudaVersion: string | null;
+  acceleratorVersion: string | null; // CUDA for NVIDIA, ROCm for AMD, Metal for Apple
+  acceleratorType: "cuda" | "rocm" | "metal" | null;
   utilizationPercent: number | null;
   temperatureCelsius: number | null;
   vramUsedMb: number | null;

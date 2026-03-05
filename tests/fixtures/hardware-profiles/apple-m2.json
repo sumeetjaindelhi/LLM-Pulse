@@ -16,7 +16,8 @@
       "model": "Apple M2 Pro",
       "vramMb": 16384,
       "driverVersion": "",
-      "cudaVersion": null,
+      "acceleratorVersion": null,
+      "acceleratorType": "metal",
       "utilizationPercent": null,
       "temperatureCelsius": null,
       "vramUsedMb": null
@@ -40,7 +41,8 @@
     "model": "Apple M2 Pro",
     "vramMb": 16384,
     "driverVersion": "",
-    "cudaVersion": null,
+    "acceleratorVersion": null,
+    "acceleratorType": "metal",
     "utilizationPercent": null,
     "temperatureCelsius": null,
     "vramUsedMb": null

@@ -7,6 +7,7 @@ import { titleBox, sectionHeader, keyValue, subLine } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
 import { progressBar, formatMb } from "../ui/progress.js";
 import { recommendationTable } from "../ui/tables.js";
+import { APPLE_UNIFIED_MEMORY_FACTOR } from "../../core/constants.js";
 import type { ScanOptions, HardwareProfile, RuntimeInfo } from "../../core/types.js";
 
 export async function scanCommand(options: ScanOptions): Promise<void> {
@@ -15,7 +16,7 @@ export async function scanCommand(options: ScanOptions): Promise<void> {
     return scanJson(options);
   }
 
-  const spinner = ora({ text: "Scanning hardware...", color: "cyan" }).start();
+  const spinner = ora({ text: "Detecting hardware (CPU, GPU, RAM, disk)...", color: "cyan" }).start();
 
   const [hardware, runtimes, ollamaModels] = await Promise.all([
     detectHardware(),
@@ -127,7 +128,10 @@ function formatGpu(hw: HardwareProfile): string {
 
   const g = hw.primaryGpu;
   const vram = formatMb(g.vramMb);
-  const cuda = g.cudaVersion ? ` · CUDA ${g.cudaVersion}` : "";
+  const accelLabel = g.acceleratorType === "cuda" ? "CUDA"
+    : g.acceleratorType === "rocm" ? "ROCm"
+    : g.acceleratorType === "metal" ? "Metal" : null;
+  const cuda = accelLabel && g.acceleratorVersion ? ` · ${accelLabel} ${g.acceleratorVersion}` : "";
   const lines = [keyValue("GPU", `${g.vendor} ${g.model}`)];
   lines.push(subLine(`${vram} VRAM${cuda}`));
 
@@ -175,7 +179,14 @@ function formatRuntime(rt: RuntimeInfo): string {
 }
 
 function estimateMaxParams(hw: HardwareProfile): number {
-  const vramMb = hw.primaryGpu?.vramMb ?? hw.memory.availableMb * 0.7;
+  let vramMb: number;
+  if (hw.primaryGpu) {
+    vramMb = hw.primaryGpu.vendor === "Apple"
+      ? hw.primaryGpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR
+      : hw.primaryGpu.vramMb;
+  } else {
+    vramMb = hw.memory.availableMb * 0.7;
+  }
   // Rough estimate: Q4_K_M uses ~0.6 GB per billion params
   const maxB = Math.floor(vramMb / 600);
   return Math.max(1, maxB);
