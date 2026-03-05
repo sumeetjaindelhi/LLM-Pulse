@@ -48,9 +48,10 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
 
   for (const model of models) {
     if (hardware) {
+      const hw = hardware;
       // Pick best fitting quantization
       const scores = model.quantizations
-        .map((q) => scoreModel(model, q, hardware!, options.category))
+        .map((q) => scoreModel(model, q, hw, options.category))
         .filter((s) => !options.fits || s.fitLevel !== "cannot_run")
         .sort((a, b) => b.compositeScore - a.compositeScore);
 
@@ -236,8 +237,10 @@ async function liveModelsCommand(options: ModelsOptions): Promise<void> {
     // Fit label: score if DB entry + hardware, "unrated" if Ollama-only
     let fitLabel: string;
     if (m.entry && hardware) {
-      const scores = m.entry.quantizations
-        .map((q) => scoreModel(m.entry!, q, hardware!, options.category))
+      const entry = m.entry;
+      const hw = hardware;
+      const scores = entry.quantizations
+        .map((q) => scoreModel(entry, q, hw, options.category))
         .filter((s) => !options.fits || s.fitLevel !== "cannot_run")
         .sort((a, b) => b.compositeScore - a.compositeScore);
       fitLabel = scores.length > 0 ? fitBadge(scores[0].fitLevel) : theme.fail("✗");

@@ -75,6 +75,26 @@ describe("scoreModel", () => {
   });
 });
 
+  it("applies Apple unified memory 0.75 factor", () => {
+    const q4 = dummyModel.quantizations[0]; // 4500 MB needed
+    const score = scoreModel(dummyModel, q4, appleM2 as HardwareProfile);
+
+    // Apple M2 has 16384 MB VRAM, after 0.75 factor → 12288 MB available
+    // 12288 / 4500 = 2.73 → excellent
+    expect(score.fitLevel).toBe("excellent");
+
+    // Now test with a model that barely fits after discount
+    const bigQuant: QuantizationVariant = {
+      name: "Q8_0",
+      bitsPerWeight: 8.5,
+      vramMb: 14000, // 14 GB needed, 12288 available after factor → cannot_run
+      qualityRetention: 0.99,
+    };
+    const bigScore = scoreModel(dummyModel, bigQuant, appleM2 as HardwareProfile);
+    // 12288 / 14000 = 0.878 → barely (>= 0.75, < 1.0)
+    expect(bigScore.fitLevel).toBe("barely");
+  });
+
 describe("getRecommendations", () => {
   it("returns top N recommendations sorted by score", () => {
     const recs = getRecommendations(highEnd as HardwareProfile, { top: 5 });

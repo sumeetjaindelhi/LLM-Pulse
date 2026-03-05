@@ -488,6 +488,56 @@
     "releaseDate": "2024-03"
   },
   {
+    "id": "deepseek-r1-1.5b",
+    "name": "DeepSeek R1 Distill 1.5B",
+    "provider": "DeepSeek",
+    "parametersBillion": 1.5,
+    "contextWindow": 65536,
+    "categories": ["reasoning"],
+    "qualityTier": "lightweight",
+    "qualityScore": 45,
+    "quantizations": [
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 1000, "qualityRetention": 0.90 },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 1700, "qualityRetention": 0.99 },
+      { "name": "F16", "bitsPerWeight": 16, "vramMb": 3200, "qualityRetention": 1.0 }
+    ],
+    "ollamaTag": "deepseek-r1:1.5b",
+    "releaseDate": "2025-01"
+  },
+  {
+    "id": "llama-3.2-vision-11b",
+    "name": "Llama 3.2 Vision 11B",
+    "provider": "Meta",
+    "parametersBillion": 11,
+    "contextWindow": 131072,
+    "categories": ["general"],
+    "qualityTier": "strong",
+    "qualityScore": 79,
+    "quantizations": [
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 7000, "qualityRetention": 0.91 },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 12000, "qualityRetention": 0.99 }
+    ],
+    "ollamaTag": "llama3.2-vision:11b",
+    "releaseDate": "2024-09"
+  },
+  {
+    "id": "mistral-small-22b",
+    "name": "Mistral Small 22B",
+    "provider": "Mistral AI",
+    "parametersBillion": 22,
+    "contextWindow": 32768,
+    "categories": ["general", "coding", "reasoning"],
+    "qualityTier": "strong",
+    "qualityScore": 85,
+    "quantizations": [
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 13000, "qualityRetention": 0.91 },
+      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 15500, "qualityRetention": 0.94 },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 23000, "qualityRetention": 0.99 }
+    ],
+    "ollamaTag": "mistral-small:22b",
+    "releaseDate": "2024-09"
+  },
+  {
     "id": "smollm2-1.7b",
     "name": "SmolLM2 1.7B",
     "provider": "Hugging Face",

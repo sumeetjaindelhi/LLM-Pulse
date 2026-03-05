@@ -1,0 +1,50 @@
+{
+  "cpu": {
+    "brand": "AMD Ryzen 7 7800X3D",
+    "manufacturer": "AMD",
+    "cores": 8,
+    "threads": 16,
+    "speed": 4.2,
+    "speedMax": 5.0,
+    "architecture": "x64",
+    "flags": ["avx", "avx2"],
+    "hasAvx2": true
+  },
+  "gpus": [
+    {
+      "vendor": "AMD",
+      "model": "Radeon RX 7900 XTX",
+      "vramMb": 24576,
+      "driverVersion": "24.5.1",
+      "acceleratorVersion": "6.1.0",
+      "acceleratorType": "rocm",
+      "utilizationPercent": 10,
+      "temperatureCelsius": 38,
+      "vramUsedMb": 800
+    }
+  ],
+  "memory": {
+    "totalMb": 32768,
+    "availableMb": 24000,
+    "usedMb": 8768,
+    "usedPercent": 27,
+    "type": "DDR5",
+    "speedMhz": 6000
+  },
+  "disk": {
+    "type": "NVMe",
+    "freeGb": 800,
+    "totalGb": 1000
+  },
+  "primaryGpu": {
+    "vendor": "AMD",
+    "model": "Radeon RX 7900 XTX",
+    "vramMb": 24576,
+    "driverVersion": "24.5.1",
+    "acceleratorVersion": "6.1.0",
+    "acceleratorType": "rocm",
+    "utilizationPercent": 10,
+    "temperatureCelsius": 38,
+    "vramUsedMb": 800
+  }
+}

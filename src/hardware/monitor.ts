@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import si from "systeminformation";
 import { execa } from "execa";
 import { OLLAMA_API_URL, ALERT_THRESHOLDS } from "../core/constants.js";
+import { parseRocmCsv } from "./gpu.js";
 import type { SessionStats, ModelUsage } from "../core/types.js";
 
 export interface MonitorSnapshot {
@@ -16,6 +17,7 @@ export interface MonitorSnapshot {
   ramUsedMb: number;
   ramTotalMb: number;
   ramPercent: number;
+  gpuVendor: string | null;
   activeModel: string | null;
   tokensPerSec: number | null;
   // Ollama detailed info
@@ -28,6 +30,7 @@ export interface MonitorSnapshot {
 export class HardwareMonitor extends EventEmitter {
   private interval: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private gpuVendor: "NVIDIA" | "AMD" | "Apple" | "unknown" = "unknown";
 
   // Sparkline history (ring buffer of last N snapshots)
   readonly cpuHistory: number[] = [];
@@ -55,9 +58,27 @@ export class HardwareMonitor extends EventEmitter {
     this.session.startedAt = Date.now();
     this.lastPollTime = Date.now();
 
-    // Fire immediately, then on interval
-    this.poll();
-    this.interval = setInterval(() => this.poll(), intervalMs);
+    // Detect GPU vendor before first poll so AMD/Apple users get correct data immediately
+    this.detectGpuVendor().then(() => {
+      if (!this.running) return;
+      this.poll();
+      this.interval = setInterval(() => this.poll(), intervalMs);
+    });
+  }
+
+  private async detectGpuVendor(): Promise<void> {
+    try {
+      const graphics = await si.graphics();
+      for (const c of graphics.controllers) {
+        if (!c.model || c.model.includes("Microsoft")) continue;
+        const v = (c.vendor || "").toLowerCase();
+        if (v.includes("nvidia")) { this.gpuVendor = "NVIDIA"; return; }
+        if (v.includes("amd") || v.includes("advanced micro")) { this.gpuVendor = "AMD"; return; }
+        if (v.includes("apple")) { this.gpuVendor = "Apple"; return; }
+      }
+    } catch {
+      // keep "unknown"
+    }
   }
 
   stop(): void {
@@ -111,12 +132,13 @@ export class HardwareMonitor extends EventEmitter {
 
     // Detect new request (tok/s goes from 0/null to positive)
     if (
+      snapshot.activeModel &&
       snapshot.tokensPerSec !== null &&
       snapshot.tokensPerSec > 0 &&
       (this.lastTokPerSec === null || this.lastTokPerSec === 0)
     ) {
       this.session.totalRequests++;
-      const usage = this.session.modelHistory.get(snapshot.activeModel!);
+      const usage = this.session.modelHistory.get(snapshot.activeModel);
       if (usage) usage.requests++;
     }
 
@@ -146,6 +168,7 @@ export class HardwareMonitor extends EventEmitter {
         ramUsedMb: mem.usedMb,
         ramTotalMb: mem.totalMb,
         ramPercent: mem.percent,
+        gpuVendor: this.gpuVendor === "unknown" ? null : this.gpuVendor,
         activeModel: ollama.model,
         tokensPerSec: ollama.tokensPerSec,
         modelSize: ollama.modelSize,
@@ -181,7 +204,7 @@ export class HardwareMonitor extends EventEmitter {
 
   private async pollMemory() {
     const mem = await si.mem();
-    const totalMb = Math.round(mem.total / (1024 * 1024));
+    const totalMb = Math.max(Math.round(mem.total / (1024 * 1024)), 1);
     const usedMb = Math.round(mem.used / (1024 * 1024));
     return {
       totalMb,
@@ -191,17 +214,24 @@ export class HardwareMonitor extends EventEmitter {
   }
 
   private async pollGpu() {
+    const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null };
+
+    if (this.gpuVendor === "AMD") {
+      return this.pollGpuAmd();
+    }
+
+    // NVIDIA (default) — also used when vendor is unknown as a first attempt
     try {
       const { stdout } = await execa("nvidia-smi", [
         "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total,power.draw,clocks.current.graphics",
         "--format=csv,noheader,nounits",
-      ]);
+      ], { timeout: 5000 });
       const parts = stdout.trim().split(",").map((s) => s.trim());
       const percent = parseInt(parts[0], 10);
       const vramUsedMb = parseInt(parts[2], 10);
       const vramTotalMb = parseInt(parts[3], 10);
       if (isNaN(percent) || isNaN(vramUsedMb) || isNaN(vramTotalMb)) {
-        return { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null };
+        return nullResult;
       }
       return {
         percent,
@@ -212,14 +242,33 @@ export class HardwareMonitor extends EventEmitter {
         clockMhz: parseInt(parts[5], 10) || null,
       };
     } catch {
+      return nullResult;
+    }
+  }
+
+  private async pollGpuAmd() {
+    const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null };
+    try {
+      const { stdout } = await execa("rocm-smi", [
+        "--showmeminfo", "vram",
+        "--showtemp",
+        "--showuse",
+        "--csv",
+      ], { timeout: 5000 });
+
+      const stats = parseRocmCsv(stdout);
+      if (stats.vramTotalMb === 0) return nullResult;
+
       return {
-        percent: null,
-        temp: null,
-        vramUsedMb: null,
-        vramTotalMb: null,
+        percent: stats.utilizationPercent || null,
+        temp: stats.temperatureCelsius || null,
+        vramUsedMb: stats.vramUsedMb,
+        vramTotalMb: stats.vramTotalMb,
         powerWatt: null,
         clockMhz: null,
       };
+    } catch {
+      return nullResult;
     }
   }
 

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { LMSTUDIO_PATHS } from "../core/constants.js";
+import { LMSTUDIO_PATHS, LMSTUDIO_API_URL } from "../core/constants.js";
 import type { RuntimeInfo } from "../core/types.js";
 
 export async function detectLmStudio(): Promise<RuntimeInfo> {
@@ -25,7 +25,7 @@ export async function detectLmStudio(): Promise<RuntimeInfo> {
   // Check if LM Studio's local server is running
   if (info.status === "installed") {
     try {
-      const response = await fetch("http://127.0.0.1:1234/v1/models", {
+      const response = await fetch(`${LMSTUDIO_API_URL}/v1/models`, {
         signal: AbortSignal.timeout(3000),
       });
       if (response.ok) {

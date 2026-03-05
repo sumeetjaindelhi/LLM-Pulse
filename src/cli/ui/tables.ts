@@ -44,7 +44,7 @@ export function recommendationTable(
     ];
     if (showInstalled) {
       const tag = s.model.ollamaTag;
-      const isInstalled = tag ? installedTags!.has(tag) : false;
+      const isInstalled = tag ? (installedTags?.has(tag) ?? false) : false;
       row.push(isInstalled ? theme.pass("● installed") : "");
     }
     table.push(row);

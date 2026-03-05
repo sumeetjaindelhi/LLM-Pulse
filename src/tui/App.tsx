@@ -25,6 +25,7 @@ const EMPTY_SNAPSHOT: MonitorSnapshot = {
   ramUsedMb: 0,
   ramTotalMb: 1,
   ramPercent: 0,
+  gpuVendor: null,
   activeModel: null,
   tokensPerSec: null,
   modelSize: null,
@@ -60,7 +61,7 @@ export function App() {
     const monitor = new HardwareMonitor();
     monitorRef.current = monitor;
 
-    monitor.on("snapshot", (s: MonitorSnapshot) => {
+    const handler = (s: MonitorSnapshot) => {
       setSnapshot(s);
       setTicks((t) => t + 1);
 
@@ -74,11 +75,13 @@ export function App() {
         ...monitor.session,
         modelHistory: new Map(monitor.session.modelHistory),
       });
-    });
+    };
 
+    monitor.on("snapshot", handler);
     monitor.start(1000);
 
     return () => {
+      monitor.removeListener("snapshot", handler);
       monitor.stop();
     };
   }, []);

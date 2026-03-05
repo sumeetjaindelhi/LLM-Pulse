@@ -1,4 +1,18 @@
-export const VERSION = "0.1.0";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { existsSync } from "node:fs";
+
+// Resolve package.json from either src/core/ or dist/src/core/
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const req = createRequire(import.meta.url);
+const pkgPath = existsSync(resolve(__dirname, "../../package.json"))
+  ? "../../package.json"
+  : "../../../package.json";
+const pkg = req(pkgPath) as { version: string };
+
+
+export const VERSION = pkg.version;
 export const APP_NAME = "LLM Pulse";
 
 // Fit level thresholds (available VRAM / required VRAM)
@@ -30,8 +44,12 @@ export const MIN_REQUIREMENTS = {
   cpuCores: 4,
 } as const;
 
+// Apple Silicon unified memory — ~25% reserved for OS + apps
+export const APPLE_UNIFIED_MEMORY_FACTOR = 0.75;
+
 // Runtime detection
 export const OLLAMA_API_URL = "http://127.0.0.1:11434";
+export const LMSTUDIO_API_URL = "http://127.0.0.1:1234";
 
 // Monitor alert thresholds
 export const ALERT_THRESHOLDS = {

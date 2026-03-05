@@ -14,7 +14,7 @@ export async function detectOllama(): Promise<RuntimeInfo> {
   // Check if binary exists
   try {
     const whichCmd = process.platform === "win32" ? "where" : "which";
-    const { stdout } = await execa(whichCmd, ["ollama"]);
+    const { stdout } = await execa(whichCmd, ["ollama"], { timeout: 5000 });
     info.path = stdout.trim().split("\n")[0];
     info.status = "installed";
   } catch {
@@ -34,7 +34,7 @@ export async function detectOllama(): Promise<RuntimeInfo> {
   } catch {
     // API not running, try getting version from CLI
     try {
-      const { stdout } = await execa("ollama", ["--version"]);
+      const { stdout } = await execa("ollama", ["--version"], { timeout: 5000 });
       const match = stdout.match(/(\d+\.\d+\.\d+)/);
       if (match) info.version = match[1];
     } catch {

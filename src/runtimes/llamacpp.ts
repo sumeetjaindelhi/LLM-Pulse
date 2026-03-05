@@ -16,13 +16,13 @@ export async function detectLlamaCpp(): Promise<RuntimeInfo> {
 
   for (const bin of binaries) {
     try {
-      const { stdout } = await execa(whichCmd, [bin]);
+      const { stdout } = await execa(whichCmd, [bin], { timeout: 5000 });
       info.path = stdout.trim().split("\n")[0];
       info.status = "installed";
 
       // Try to get version
       try {
-        const { stdout: ver } = await execa(bin, ["--version"]);
+        const { stdout: ver } = await execa(bin, ["--version"], { timeout: 5000 });
         const match = ver.match(/(\d+\.\d+[\.\d]*)/);
         if (match) info.version = match[1];
       } catch {

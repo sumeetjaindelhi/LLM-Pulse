@@ -3,6 +3,8 @@ import { runDiagnostics } from "../../src/analysis/doctor.js";
 import type { HardwareProfile, RuntimeInfo } from "../../src/core/types.js";
 import highEnd from "../fixtures/hardware-profiles/high-end-nvidia.json";
 import cpuOnly from "../fixtures/hardware-profiles/cpu-only.json";
+import appleM2 from "../fixtures/hardware-profiles/apple-m2.json";
+import amdRdna3 from "../fixtures/hardware-profiles/amd-rdna3.json";
 
 const noRuntimes: RuntimeInfo[] = [
   { name: "Ollama", status: "not_found", version: null, path: null, models: [] },
@@ -53,6 +55,42 @@ describe("runDiagnostics", () => {
   it("provides actionable suggestion", () => {
     const report = runDiagnostics(cpuOnly as HardwareProfile, noRuntimes);
     expect(report.topSuggestion).toBeTruthy();
+  });
+
+  it("shows unified memory info for Apple Silicon", () => {
+    const report = runDiagnostics(appleM2 as HardwareProfile, withOllama);
+    const memCheck = report.checks.find((c) => c.label === "Unified Memory");
+    expect(memCheck).toBeDefined();
+    expect(memCheck!.severity).toBe("info");
+    expect(memCheck!.message).toContain("75%");
+  });
+
+  it("warns about missing ROCm on AMD GPU without accelerator", () => {
+    const amdNoRocm: HardwareProfile = {
+      ...(amdRdna3 as HardwareProfile),
+      primaryGpu: {
+        ...(amdRdna3 as HardwareProfile).primaryGpu!,
+        acceleratorVersion: null,
+      },
+    };
+    const report = runDiagnostics(amdNoRocm, withOllama);
+    const rocmCheck = report.checks.find((c) => c.label === "ROCm");
+    expect(rocmCheck).toBeDefined();
+    expect(rocmCheck!.severity).toBe("warning");
+    expect(rocmCheck!.message).toContain("rocm-smi not found");
+  });
+
+  it("does not warn about ROCm when AMD GPU has accelerator version", () => {
+    const report = runDiagnostics(amdRdna3 as HardwareProfile, withOllama);
+    const rocmCheck = report.checks.find((c) => c.label === "ROCm");
+    expect(rocmCheck).toBeUndefined();
+  });
+
+  it("recognizes ARM CPU NEON as pass for SIMD", () => {
+    const report = runDiagnostics(appleM2 as HardwareProfile, withOllama);
+    const simdCheck = report.checks.find((c) => c.label === "SIMD");
+    expect(simdCheck).toBeDefined();
+    expect(simdCheck!.severity).toBe("pass");
   });
 
   it("score is always 0-100", () => {
