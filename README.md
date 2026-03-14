@@ -55,7 +55,7 @@ llm-pulse doctor --format json
 Browse the model database filtered for your hardware.
 
 ```bash
-llm-pulse models                      # All 30+ models
+llm-pulse models                      # All 45+ models
 llm-pulse models --search llama       # Search by name
 llm-pulse models --category coding    # Filter by category
 llm-pulse models --fits               # Only models that fit your VRAM
@@ -103,7 +103,7 @@ console.log(recs[0].pullCommand);        // "ollama pull qwen2.5-coder:14b"
 
 **Runtimes:** [Ollama](https://ollama.com), [llama.cpp](https://github.com/ggerganov/llama.cpp), [LM Studio](https://lmstudio.ai)
 
-**Models:** 30+ models across general, coding, reasoning, creative, multilingual — each with Q4/Q5/Q8/F16 quantization variants
+**Models:** 45+ models across general, coding, reasoning, creative, multilingual — each with Q4/Q5/Q8/F16 quantization variants
 
 ## License
 
