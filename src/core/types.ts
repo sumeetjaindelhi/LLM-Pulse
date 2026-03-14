@@ -142,7 +142,7 @@ export interface HealthReport {
 
 // ── Monitor ──────────────────────────────────
 
-export type MonitorTab = "overview" | "inference" | "vram";
+export type MonitorTab = "overview" | "inference" | "gpu" | "vram";
 
 export interface ModelUsage {
   name: string; // e.g. "llama3.1:8b"

@@ -58,6 +58,7 @@ export const ALERT_THRESHOLDS = {
   gpuUnderutilizedPercent: 20,
   noModelTimeoutMs: 5 * 60 * 1000, // 5 minutes
   sparklineHistory: 60, // number of data points
+  gpuTempHighCelsius: 80,
 } as const;
 
 // Expected tok/s baselines by GPU tier + model size (rough estimates)

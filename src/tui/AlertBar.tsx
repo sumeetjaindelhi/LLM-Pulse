@@ -25,6 +25,15 @@ function computeAlerts(snapshot: MonitorSnapshot, session: SessionStats, tokHist
     }
   }
 
+  // GPU high temperature
+  if (snapshot.gpuTemp !== null && snapshot.gpuTemp >= ALERT_THRESHOLDS.gpuTempHighCelsius) {
+    alerts.push({
+      severity: "warning",
+      icon: "\u26A0",
+      message: `GPU temperature at ${Math.round(snapshot.gpuTemp)}\u00B0C \u2014 possible thermal throttling`,
+    });
+  }
+
   // Speed drop detection (compare recent avg to earlier avg)
   if (tokHistory.length >= 20) {
     const recentSlice = tokHistory.slice(-10).filter((v) => v > 0);

@@ -67,6 +67,7 @@ Live TUI dashboard — like htop for LLMs. Press `Tab` to switch views, `q` to q
 
 - **Overview** — CPU/GPU/RAM/VRAM bars with sparklines + smart alerts
 - **Inference** — Throughput chart + session stats
+- **GPU** — Per-GPU utilization, temperature, VRAM, and power sparklines with peak stats + temperature alerts
 - **VRAM Map** — Visual VRAM breakdown (model weights / KV cache / overhead / free)
 
 ```bash

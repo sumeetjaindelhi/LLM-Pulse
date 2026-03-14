@@ -2,14 +2,16 @@ import React, { useState, useEffect, useRef } from "react";
 import { Text, Box, useInput, useApp } from "ink";
 import { Overview } from "./Overview.js";
 import { Inference } from "./Inference.js";
+import { GpuDetail } from "./GpuDetail.js";
 import { VramMap } from "./VramMap.js";
 import { HardwareMonitor, type MonitorSnapshot } from "../hardware/monitor.js";
 import type { MonitorTab, SessionStats } from "../core/types.js";
 
-const TABS: MonitorTab[] = ["overview", "inference", "vram"];
+const TABS: MonitorTab[] = ["overview", "inference", "gpu", "vram"];
 const TAB_LABELS: Record<MonitorTab, string> = {
   overview: "Overview",
   inference: "Inference",
+  gpu: "GPU",
   vram: "VRAM",
 };
 
@@ -26,6 +28,7 @@ const EMPTY_SNAPSHOT: MonitorSnapshot = {
   ramTotalMb: 1,
   ramPercent: 0,
   gpuVendor: null,
+  gpuModel: null,
   activeModel: null,
   tokensPerSec: null,
   modelSize: null,
@@ -54,6 +57,9 @@ export function App() {
   const [cpuHistory, setCpuHistory] = useState<number[]>([]);
   const [gpuHistory, setGpuHistory] = useState<number[]>([]);
   const [tokHistory, setTokHistory] = useState<number[]>([]);
+  const [gpuTempHistory, setGpuTempHistory] = useState<number[]>([]);
+  const [gpuVramHistory, setGpuVramHistory] = useState<number[]>([]);
+  const [gpuPowerHistory, setGpuPowerHistory] = useState<number[]>([]);
 
   const monitorRef = useRef<HardwareMonitor | null>(null);
 
@@ -69,6 +75,9 @@ export function App() {
       setCpuHistory([...monitor.cpuHistory]);
       setGpuHistory([...monitor.gpuHistory]);
       setTokHistory([...monitor.tokHistory]);
+      setGpuTempHistory([...monitor.gpuTempHistory]);
+      setGpuVramHistory([...monitor.gpuVramHistory]);
+      setGpuPowerHistory([...monitor.gpuPowerHistory]);
 
       // Copy session stats (create new object for React diffing)
       setSession({
@@ -132,6 +141,15 @@ export function App() {
           snapshot={snapshot}
           session={session}
           tokHistory={tokHistory}
+        />
+      )}
+      {activeTab === "gpu" && (
+        <GpuDetail
+          snapshot={snapshot}
+          gpuHistory={gpuHistory}
+          gpuTempHistory={gpuTempHistory}
+          gpuVramHistory={gpuVramHistory}
+          gpuPowerHistory={gpuPowerHistory}
         />
       )}
       {activeTab === "vram" && (

@@ -18,6 +18,7 @@ export interface MonitorSnapshot {
   ramTotalMb: number;
   ramPercent: number;
   gpuVendor: string | null;
+  gpuModel: string | null;
   activeModel: string | null;
   tokensPerSec: number | null;
   // Ollama detailed info
@@ -31,11 +32,15 @@ export class HardwareMonitor extends EventEmitter {
   private interval: ReturnType<typeof setInterval> | null = null;
   private running = false;
   private gpuVendor: "NVIDIA" | "AMD" | "Apple" | "unknown" = "unknown";
+  private gpuModelName: string | null = null;
 
   // Sparkline history (ring buffer of last N snapshots)
   readonly cpuHistory: number[] = [];
   readonly gpuHistory: number[] = [];
   readonly tokHistory: number[] = [];
+  readonly gpuTempHistory: number[] = [];
+  readonly gpuVramHistory: number[] = [];
+  readonly gpuPowerHistory: number[] = [];
   private readonly maxHistory = ALERT_THRESHOLDS.sparklineHistory;
 
   // Session tracking
@@ -72,9 +77,9 @@ export class HardwareMonitor extends EventEmitter {
       for (const c of graphics.controllers) {
         if (!c.model || c.model.includes("Microsoft")) continue;
         const v = (c.vendor || "").toLowerCase();
-        if (v.includes("nvidia")) { this.gpuVendor = "NVIDIA"; return; }
-        if (v.includes("amd") || v.includes("advanced micro")) { this.gpuVendor = "AMD"; return; }
-        if (v.includes("apple")) { this.gpuVendor = "Apple"; return; }
+        if (v.includes("nvidia")) { this.gpuVendor = "NVIDIA"; this.gpuModelName = c.model; return; }
+        if (v.includes("amd") || v.includes("advanced micro")) { this.gpuVendor = "AMD"; this.gpuModelName = c.model; return; }
+        if (v.includes("apple")) { this.gpuVendor = "Apple"; this.gpuModelName = c.model; return; }
       }
     } catch {
       // keep "unknown"
@@ -169,6 +174,7 @@ export class HardwareMonitor extends EventEmitter {
         ramTotalMb: mem.totalMb,
         ramPercent: mem.percent,
         gpuVendor: this.gpuVendor === "unknown" ? null : this.gpuVendor,
+        gpuModel: this.gpuModelName,
         activeModel: ollama.model,
         tokensPerSec: ollama.tokensPerSec,
         modelSize: ollama.modelSize,
@@ -181,6 +187,12 @@ export class HardwareMonitor extends EventEmitter {
       this.pushHistory(this.cpuHistory, snapshot.cpuPercent);
       this.pushHistory(this.gpuHistory, snapshot.gpuPercent);
       this.pushHistory(this.tokHistory, snapshot.tokensPerSec);
+      this.pushHistory(this.gpuTempHistory, snapshot.gpuTemp);
+      const vramPercent = snapshot.gpuVramUsedMb !== null && snapshot.gpuVramTotalMb !== null && snapshot.gpuVramTotalMb > 0
+        ? (snapshot.gpuVramUsedMb / snapshot.gpuVramTotalMb) * 100
+        : null;
+      this.pushHistory(this.gpuVramHistory, vramPercent);
+      this.pushHistory(this.gpuPowerHistory, snapshot.gpuPowerWatt);
 
       // Update session stats
       this.updateSession(snapshot);
