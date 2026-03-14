@@ -50,7 +50,7 @@ export function App() {
   const { exit } = useApp();
   const [snapshot, setSnapshot] = useState<MonitorSnapshot>(EMPTY_SNAPSHOT);
   const [activeTab, setActiveTab] = useState<MonitorTab>("overview");
-  const [ticks, setTicks] = useState(0);
+  const ticksRef = useRef(0);
 
   // Keep references to monitor data that updates outside React state
   const [session, setSession] = useState<SessionStats>(EMPTY_SESSION);
@@ -69,7 +69,7 @@ export function App() {
 
     const handler = (s: MonitorSnapshot) => {
       setSnapshot(s);
-      setTicks((t) => t + 1);
+      ticksRef.current += 1;
 
       // Copy history arrays (shallow copy for React diffing)
       setCpuHistory([...monitor.cpuHistory]);
@@ -87,7 +87,7 @@ export function App() {
     };
 
     monitor.on("snapshot", handler);
-    monitor.start(1000);
+    monitor.start(2000);
 
     return () => {
       monitor.removeListener("snapshot", handler);
@@ -159,7 +159,7 @@ export function App() {
       {/* Footer */}
       <Text>{""}</Text>
       <Text dimColor>{"  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"}</Text>
-      <Text dimColor>{`  [Tab] switch view  [q] quit    Updates: ${ticks}`}</Text>
+      <Text dimColor>{`  [Tab] switch view  [q] quit    Updates: ${ticksRef.current}`}</Text>
     </Box>
   );
 }

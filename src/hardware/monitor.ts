@@ -29,8 +29,9 @@ export interface MonitorSnapshot {
 }
 
 export class HardwareMonitor extends EventEmitter {
-  private interval: ReturnType<typeof setInterval> | null = null;
+  private timeout: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private intervalMs = 2000;
   private gpuVendor: "NVIDIA" | "AMD" | "Apple" | "unknown" = "unknown";
   private gpuModelName: string | null = null;
 
@@ -57,9 +58,10 @@ export class HardwareMonitor extends EventEmitter {
   private lastTokPerSec: number | null = null;
   private lastPollTime: number = Date.now();
 
-  start(intervalMs = 1000): void {
+  start(intervalMs = 2000): void {
     if (this.running) return;
     this.running = true;
+    this.intervalMs = intervalMs;
     this.session.startedAt = Date.now();
     this.lastPollTime = Date.now();
 
@@ -67,7 +69,6 @@ export class HardwareMonitor extends EventEmitter {
     this.detectGpuVendor().then(() => {
       if (!this.running) return;
       this.poll();
-      this.interval = setInterval(() => this.poll(), intervalMs);
     });
   }
 
@@ -88,9 +89,9 @@ export class HardwareMonitor extends EventEmitter {
 
   stop(): void {
     this.running = false;
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
+    if (this.timeout) {
+      clearTimeout(this.timeout);
+      this.timeout = null;
     }
   }
 
@@ -200,6 +201,10 @@ export class HardwareMonitor extends EventEmitter {
       this.emit("snapshot", snapshot);
     } catch {
       // Swallow polling errors to keep running
+    } finally {
+      if (this.running) {
+        this.timeout = setTimeout(() => this.poll(), this.intervalMs);
+      }
     }
   }
 
