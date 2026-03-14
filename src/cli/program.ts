@@ -4,6 +4,7 @@ import { scanCommand } from "./commands/scan.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { modelsCommand } from "./commands/models.js";
 import { benchmarkCommand } from "./commands/benchmark.js";
+import { compareCommand } from "./commands/compare.js";
 import type { ScanOptions, ModelCategory, OutputFormat } from "../core/types.js";
 
 export function createProgram(): Command {
@@ -12,7 +13,8 @@ export function createProgram(): Command {
   program
     .name("llm-pulse")
     .description("Zero-config CLI for monitoring your local LLM hardware, runtimes, and model compatibility")
-    .version(VERSION);
+    .version(VERSION)
+    .enablePositionalOptions();
 
   // Default action (no subcommand) runs scan
   program
@@ -75,6 +77,23 @@ export function createProgram(): Command {
         live: opts.live || opts.installed,
         installed: opts.installed,
         format: opts.format,
+      });
+    });
+
+  // Compare command
+  program
+    .command("compare [models...]")
+    .description("Compare models side-by-side against your hardware")
+    .option("-f, --format <format>", "Output format (table or json)", "table")
+    .option("-c, --category <category>", "Auto-pick top models from category", "all")
+    .option("-t, --top <n>", "Number of models to compare (with --category)", "3")
+    .option("-q, --quant <quant>", "Force specific quantization (e.g. Q4_K_M)")
+    .action(async (models: string[], opts) => {
+      await compareCommand(models, {
+        format: opts.format as OutputFormat,
+        category: opts.category as ModelCategory | "all",
+        top: parseInt(opts.top, 10),
+        quant: opts.quant,
       });
     });
 

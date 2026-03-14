@@ -50,3 +50,7 @@ export function filterByCategory(category: ModelCategory): ModelEntry[] {
 export function getModelById(id: string): ModelEntry | undefined {
   return loadModels().find((m) => m.id === id);
 }
+
+export function getModelByTag(tag: string): ModelEntry | undefined {
+  return loadModels().find((m) => m.ollamaTag === tag);
+}
