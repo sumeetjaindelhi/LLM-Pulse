@@ -19,7 +19,7 @@ export const ModelEntrySchema = z.object({
   qualityTier: z.enum(["frontier", "strong", "good", "lightweight"]),
   qualityScore: z.number().min(0).max(100),
   quantizations: z.array(QuantizationVariantSchema).min(1),
-  ollamaTag: z.string().nullable(),
+  ollamaTag: z.string().regex(/^[a-zA-Z0-9:._\/-]+$/).nullable(),
   releaseDate: z.string(),
 });
 

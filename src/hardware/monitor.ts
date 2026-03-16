@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import si from "systeminformation";
 import { execa } from "execa";
 import { OLLAMA_API_URL, ALERT_THRESHOLDS } from "../core/constants.js";
+import { OllamaPsSchema } from "../core/api-schemas.js";
 import { parseRocmCsv } from "./gpu.js";
 import type { SessionStats, ModelUsage } from "../core/types.js";
 
@@ -304,18 +305,7 @@ export class HardwareMonitor extends EventEmitter {
           maxContext: null,
         };
 
-      const data = (await res.json()) as {
-        models: Array<{
-          name: string;
-          size?: number;
-          details?: {
-            tokens_per_second?: number;
-            quantization_level?: string;
-            parameter_size?: string;
-          };
-          size_vram?: number;
-        }>;
-      };
+      const data = OllamaPsSchema.parse(await res.json());
 
       if (data.models.length === 0)
         return {

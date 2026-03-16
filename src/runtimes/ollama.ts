@@ -1,5 +1,6 @@
 import { execa } from "execa";
 import { OLLAMA_API_URL } from "../core/constants.js";
+import { OllamaVersionSchema, OllamaTagsSchema } from "../core/api-schemas.js";
 import type { RuntimeInfo } from "../core/types.js";
 
 export async function detectOllama(): Promise<RuntimeInfo> {
@@ -27,7 +28,7 @@ export async function detectOllama(): Promise<RuntimeInfo> {
       signal: AbortSignal.timeout(3000),
     });
     if (response.ok) {
-      const data = (await response.json()) as { version: string };
+      const data = OllamaVersionSchema.parse(await response.json());
       info.version = data.version;
       info.status = "running";
     }
@@ -49,7 +50,7 @@ export async function detectOllama(): Promise<RuntimeInfo> {
       signal: AbortSignal.timeout(3000),
     });
     if (response.ok) {
-      const data = (await response.json()) as { models: Array<{ name: string }> };
+      const data = OllamaTagsSchema.parse(await response.json());
       info.models = data.models.map((m) => m.name);
     }
   } catch {

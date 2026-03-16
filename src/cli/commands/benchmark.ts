@@ -2,6 +2,7 @@ import ora from "ora";
 import { theme } from "../ui/colors.js";
 import { sectionHeader } from "../ui/boxes.js";
 import { OLLAMA_API_URL } from "../../core/constants.js";
+import { OllamaPickModelSchema, BenchmarkLineSchema } from "../../core/api-schemas.js";
 
 interface BenchmarkOptions {
   model: string;
@@ -117,7 +118,7 @@ async function pickModel(): Promise<string | null> {
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { models: Array<{ name: string; size: number }> };
+    const data = OllamaPickModelSchema.parse(await res.json());
     if (data.models.length === 0) return null;
 
     // Pick smallest model for quick benchmark
@@ -160,7 +161,7 @@ async function runInference(model: string, prompt: string): Promise<RoundResult 
 
       for (const line of lines) {
         try {
-          const json = JSON.parse(line) as { response?: string; done?: boolean };
+          const json = BenchmarkLineSchema.parse(JSON.parse(line));
           if (json.response) {
             if (firstTokenTime === null) {
               firstTokenTime = performance.now();

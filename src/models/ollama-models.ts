@@ -1,17 +1,6 @@
 import { OLLAMA_API_URL } from "../core/constants.js";
+import { OllamaTagsSchema } from "../core/api-schemas.js";
 import type { OllamaModel } from "../core/types.js";
-
-interface OllamaTagsResponse {
-  models: Array<{
-    name: string;
-    size: number;
-    details: {
-      parameter_size: string;
-      quantization_level: string;
-      family: string;
-    };
-  }>;
-}
 
 let cachedModels: OllamaModel[] | null = null;
 
@@ -25,9 +14,7 @@ export async function fetchOllamaModels(): Promise<OllamaModel[]> {
 
     if (!response.ok) return [];
 
-    const data = (await response.json()) as OllamaTagsResponse;
-
-    if (!data.models || !Array.isArray(data.models)) return [];
+    const data = OllamaTagsSchema.parse(await response.json());
 
     cachedModels = data.models.map((m) => ({
       name: m.name,

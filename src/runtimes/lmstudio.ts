@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { LMSTUDIO_PATHS, LMSTUDIO_API_URL } from "../core/constants.js";
+import { LmStudioModelsSchema } from "../core/api-schemas.js";
 import type { RuntimeInfo } from "../core/types.js";
 
 export async function detectLmStudio(): Promise<RuntimeInfo> {
@@ -30,7 +31,7 @@ export async function detectLmStudio(): Promise<RuntimeInfo> {
       });
       if (response.ok) {
         info.status = "running";
-        const data = (await response.json()) as { data: Array<{ id: string }> };
+        const data = LmStudioModelsSchema.parse(await response.json());
         info.models = data.data.map((m) => m.id);
       }
     } catch {
