@@ -1,6 +1,6 @@
 {
   "name": "llm-pulse",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Zero-config CLI for monitoring your local LLM hardware, runtimes, and model compatibility",
   "type": "module",
   "main": "dist/src/index.js",
