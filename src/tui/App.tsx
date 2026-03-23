@@ -46,7 +46,7 @@ const EMPTY_SESSION: SessionStats = {
   lastModelSwapAt: null,
 };
 
-export function App() {
+export function App({ host }: { host?: string }) {
   const { exit } = useApp();
   const [snapshot, setSnapshot] = useState<MonitorSnapshot>(EMPTY_SNAPSHOT);
   const [activeTab, setActiveTab] = useState<MonitorTab>("overview");
@@ -64,7 +64,7 @@ export function App() {
   const monitorRef = useRef<HardwareMonitor | null>(null);
 
   useEffect(() => {
-    const monitor = new HardwareMonitor();
+    const monitor = new HardwareMonitor(host);
     monitorRef.current = monitor;
 
     const handler = (s: MonitorSnapshot) => {

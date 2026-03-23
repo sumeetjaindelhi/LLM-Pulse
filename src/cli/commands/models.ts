@@ -7,6 +7,8 @@ import { scoreModel } from "../../analysis/scorer.js";
 import { theme } from "../ui/colors.js";
 import { fitBadge } from "../ui/badges.js";
 import { sectionHeader } from "../ui/boxes.js";
+import { toCsv } from "../ui/csv.js";
+import { resolveOllamaHost } from "../../core/config.js";
 import type { ModelEntry, ModelCategory, HardwareProfile, MergedModel } from "../../core/types.js";
 
 interface ModelsOptions {
@@ -16,11 +18,13 @@ interface ModelsOptions {
   live: boolean;
   installed: boolean;
   format: string;
+  host?: string;
 }
 
 export async function modelsCommand(options: ModelsOptions): Promise<void> {
+  const ollamaHost = resolveOllamaHost(options.host);
   if (options.live) {
-    return liveModelsCommand(options);
+    return liveModelsCommand(options, ollamaHost);
   }
 
   let models: ModelEntry[];
@@ -91,6 +95,16 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
     return;
   }
 
+  if (options.format === "csv") {
+    const headers = ["id", "name", "provider", "parametersBillion", "categories", "quantization", "vramMb", "ollamaTag"];
+    const rows = scored.map((s) => [
+      s.model.id, s.model.name, s.model.provider, s.model.parametersBillion,
+      s.model.categories.join(";"), s.bestQuant, s.vramMb, s.model.ollamaTag,
+    ]);
+    console.log(toCsv(headers, rows));
+    return;
+  }
+
   console.log(sectionHeader(`Models${options.search ? ` matching "${options.search}"` : ""} (${scored.length} results)`));
   console.log();
 
@@ -144,16 +158,16 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
   console.log();
 }
 
-async function liveModelsCommand(options: ModelsOptions): Promise<void> {
+async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Promise<void> {
   const spinner = ora({ text: "Fetching models from Ollama...", color: "cyan" }).start();
 
   let merged: MergedModel[];
   let hardware: HardwareProfile | null = null;
 
   if (options.fits) {
-    [merged, hardware] = await Promise.all([getMergedModels(), detectHardware()]);
+    [merged, hardware] = await Promise.all([getMergedModels(ollamaHost), detectHardware()]);
   } else {
-    merged = await getMergedModels();
+    merged = await getMergedModels(ollamaHost);
   }
 
   spinner.succeed("Models fetched");
@@ -187,6 +201,22 @@ async function liveModelsCommand(options: ModelsOptions): Promise<void> {
       sizeBytes: m.ollamaModel?.size ?? null,
     }));
     console.log(JSON.stringify(output, null, 2));
+    return;
+  }
+
+  if (options.format === "csv") {
+    const headers = ["name", "ollamaTag", "installed", "provider", "parametersBillion", "quantization", "family", "sizeBytes"];
+    const rows = merged.map((m) => [
+      m.entry?.name ?? m.ollamaModel?.name ?? "",
+      m.ollamaTag,
+      m.installed,
+      m.entry?.provider ?? null,
+      m.entry?.parametersBillion ?? null,
+      m.ollamaModel?.quantization ?? null,
+      m.ollamaModel?.family ?? null,
+      m.ollamaModel?.size ?? null,
+    ]);
+    console.log(toCsv(headers, rows));
     return;
   }
 

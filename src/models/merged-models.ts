@@ -2,10 +2,10 @@ import { getAllModels } from "./database.js";
 import { fetchOllamaModels } from "./ollama-models.js";
 import type { MergedModel, OllamaModel } from "../core/types.js";
 
-export async function getMergedModels(): Promise<MergedModel[]> {
+export async function getMergedModels(ollamaHost?: string): Promise<MergedModel[]> {
   const [dbModels, ollamaModels] = await Promise.all([
     Promise.resolve(getAllModels()),
-    fetchOllamaModels(),
+    fetchOllamaModels(ollamaHost),
   ]);
 
   // Index Ollama models by name for fast lookup

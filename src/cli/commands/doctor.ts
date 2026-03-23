@@ -5,13 +5,16 @@ import { runDiagnostics } from "../../analysis/doctor.js";
 import { theme } from "../ui/colors.js";
 import { severityIcon } from "../ui/badges.js";
 import { sectionHeader } from "../ui/boxes.js";
+import { toCsv } from "../ui/csv.js";
+import { resolveOllamaHost } from "../../core/config.js";
 
-export async function doctorCommand(options: { format?: string }): Promise<void> {
+export async function doctorCommand(options: { format?: string; host?: string }): Promise<void> {
+  const ollamaHost = resolveOllamaHost(options.host);
   const spinner = ora({ text: "Running diagnostics...", color: "cyan" }).start();
 
   const [hardware, runtimes] = await Promise.all([
     detectHardware(),
-    detectAllRuntimes(),
+    detectAllRuntimes(ollamaHost),
   ]);
 
   const report = runDiagnostics(hardware, runtimes);
@@ -19,6 +22,13 @@ export async function doctorCommand(options: { format?: string }): Promise<void>
 
   if (options.format === "json") {
     console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  if (options.format === "csv") {
+    const headers = ["label", "severity", "message", "suggestion"];
+    const rows = report.checks.map((c) => [c.label, c.severity, c.message, c.suggestion ?? ""]);
+    console.log(toCsv(headers, rows));
     return;
   }
 

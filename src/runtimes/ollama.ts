@@ -3,7 +3,8 @@ import { OLLAMA_API_URL } from "../core/constants.js";
 import { OllamaVersionSchema, OllamaTagsSchema } from "../core/api-schemas.js";
 import type { RuntimeInfo } from "../core/types.js";
 
-export async function detectOllama(): Promise<RuntimeInfo> {
+export async function detectOllama(host?: string): Promise<RuntimeInfo> {
+  const baseUrl = host || OLLAMA_API_URL;
   const info: RuntimeInfo = {
     name: "Ollama",
     status: "not_found",
@@ -24,7 +25,7 @@ export async function detectOllama(): Promise<RuntimeInfo> {
 
   // Check if API is running and get version
   try {
-    const response = await fetch(`${OLLAMA_API_URL}/api/version`, {
+    const response = await fetch(`${baseUrl}/api/version`, {
       signal: AbortSignal.timeout(3000),
     });
     if (response.ok) {
@@ -46,7 +47,7 @@ export async function detectOllama(): Promise<RuntimeInfo> {
 
   // Get installed models
   try {
-    const response = await fetch(`${OLLAMA_API_URL}/api/tags`, {
+    const response = await fetch(`${baseUrl}/api/tags`, {
       signal: AbortSignal.timeout(3000),
     });
     if (response.ok) {

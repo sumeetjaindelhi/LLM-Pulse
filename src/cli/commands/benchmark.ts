@@ -1,12 +1,17 @@
 import ora from "ora";
 import { theme } from "../ui/colors.js";
 import { sectionHeader } from "../ui/boxes.js";
-import { OLLAMA_API_URL } from "../../core/constants.js";
-import { OllamaPickModelSchema, BenchmarkLineSchema } from "../../core/api-schemas.js";
+import { toCsv } from "../ui/csv.js";
+import { resolveOllamaHost } from "../../core/config.js";
+import { pickOllamaModel } from "../utils/ollama-helpers.js";
+import { BenchmarkLineSchema } from "../../core/api-schemas.js";
+import type { OutputFormat } from "../../core/types.js";
 
 interface BenchmarkOptions {
   model: string;
   rounds: number;
+  format: OutputFormat;
+  host?: string;
 }
 
 const TEST_PROMPTS = [
@@ -26,12 +31,17 @@ interface RoundResult {
 }
 
 export async function benchmarkCommand(options: BenchmarkOptions): Promise<void> {
+  const baseUrl = resolveOllamaHost(options.host);
+  const isJson = options.format === "json";
+  const isCsv = options.format === "csv";
+  const silent = isJson || isCsv;
+
   // Check if Ollama is running
-  const spinner = ora({ text: "Checking Ollama...", color: "cyan" }).start();
+  const spinner = silent ? null : ora({ text: "Checking Ollama...", color: "cyan" }).start();
 
   let isRunning = false;
   try {
-    const res = await fetch(`${OLLAMA_API_URL}/api/version`, {
+    const res = await fetch(`${baseUrl}/api/version`, {
       signal: AbortSignal.timeout(3000),
     });
     isRunning = res.ok;
@@ -40,54 +50,65 @@ export async function benchmarkCommand(options: BenchmarkOptions): Promise<void>
   }
 
   if (!isRunning) {
-    spinner.fail("Ollama is not running");
-    console.log(`\n  ${theme.fail("Ollama must be running for benchmarks.")}`);
-    console.log(`  Start it with: ${theme.command("ollama serve")}`);
-    console.log(`  Install from:  ${theme.command("https://ollama.com")}\n`);
+    spinner?.fail("Ollama is not running");
+    if (!silent) {
+      console.log(`\n  ${theme.fail("Ollama must be running for benchmarks.")}`);
+      console.log(`  Start it with: ${theme.command("ollama serve")}`);
+      console.log(`  Install from:  ${theme.command("https://ollama.com")}\n`);
+    } else {
+      console.log(isJson ? JSON.stringify({ error: "Ollama is not running" }) : "");
+    }
     return;
   }
 
   // Determine which model to use
   let model = options.model;
   if (!model) {
-    spinner.text = "Finding a model to benchmark...";
-    const picked = await pickModel();
+    spinner && (spinner.text = "Finding a model to benchmark...");
+    const picked = await pickOllamaModel(baseUrl);
     model = picked ?? "";
     if (!model) {
-      spinner.fail("No models available");
-      console.log(`\n  ${theme.warning("No models installed in Ollama.")}`);
-      console.log(`  Pull one first: ${theme.command("ollama pull tinyllama")}\n`);
+      spinner?.fail("No models available");
+      if (!silent) {
+        console.log(`\n  ${theme.warning("No models installed in Ollama.")}`);
+        console.log(`  Pull one first: ${theme.command("ollama pull tinyllama")}\n`);
+      } else {
+        console.log(isJson ? JSON.stringify({ error: "No models installed" }) : "");
+      }
       return;
     }
   }
 
-  spinner.succeed(`Benchmarking ${theme.highlight(model)}`);
-  console.log(sectionHeader(`Inference Benchmark — ${model}`));
-  console.log(`\n  Running ${options.rounds} rounds...\n`);
+  spinner?.succeed(`Benchmarking ${theme.highlight(model)}`);
+  if (!silent) {
+    console.log(sectionHeader(`Inference Benchmark — ${model}`));
+    console.log(`\n  Running ${options.rounds} rounds...\n`);
+  }
 
   const results: RoundResult[] = [];
   const prompts = TEST_PROMPTS.slice(0, options.rounds);
 
   for (let i = 0; i < prompts.length; i++) {
-    const roundSpinner = ora({
+    const roundSpinner = silent ? null : ora({
       text: `  Round ${i + 1}/${prompts.length}...`,
       color: "cyan",
     }).start();
 
-    const result = await runInference(model, prompts[i]);
+    const result = await runInference(baseUrl, model, prompts[i]);
 
     if (result) {
       results.push(result);
-      roundSpinner.succeed(
+      roundSpinner?.succeed(
         `  Round ${i + 1}: ${theme.number(`${result.tokensPerSec.toFixed(1)} tok/s`)}  TTFT: ${theme.number(`${result.ttftMs}ms`)}  Tokens: ${result.tokensGenerated}`,
       );
     } else {
-      roundSpinner.fail(`  Round ${i + 1}: failed`);
+      roundSpinner?.fail(`  Round ${i + 1}: failed`);
     }
   }
 
   if (results.length === 0) {
-    console.log(`\n  ${theme.fail("All rounds failed. Check Ollama logs.")}\n`);
+    if (!silent) console.log(`\n  ${theme.fail("All rounds failed. Check Ollama logs.")}\n`);
+    else console.log(isJson ? JSON.stringify({ error: "All rounds failed" }) : "");
     return;
   }
 
@@ -95,6 +116,34 @@ export async function benchmarkCommand(options: BenchmarkOptions): Promise<void>
   const avgTps = results.reduce((s, r) => s + r.tokensPerSec, 0) / results.length;
   const avgTtft = results.reduce((s, r) => s + r.ttftMs, 0) / results.length;
   const totalTokens = results.reduce((s, r) => s + r.tokensGenerated, 0);
+
+  if (isJson) {
+    console.log(JSON.stringify({
+      model,
+      rounds: results.length,
+      avgTokensPerSec: Math.round(avgTps * 10) / 10,
+      avgTtftMs: Math.round(avgTtft),
+      totalTokens,
+      results: results.map((r) => ({
+        prompt: r.prompt.slice(0, 80),
+        tokensGenerated: r.tokensGenerated,
+        totalMs: r.totalMs,
+        tokensPerSec: Math.round(r.tokensPerSec * 10) / 10,
+        ttftMs: r.ttftMs,
+      })),
+    }, null, 2));
+    return;
+  }
+
+  if (isCsv) {
+    const headers = ["round", "prompt", "tokensGenerated", "totalMs", "tokensPerSec", "ttftMs"];
+    const rows = results.map((r, i) => [
+      i + 1, r.prompt.slice(0, 80), r.tokensGenerated, r.totalMs,
+      Math.round(r.tokensPerSec * 10) / 10, r.ttftMs,
+    ]);
+    console.log(toCsv(headers, rows));
+    return;
+  }
 
   console.log(`\n  ${theme.subheader("Results")}:`);
   console.log(`  Avg tokens/sec:  ${theme.pass(avgTps.toFixed(1))}`);
@@ -112,30 +161,13 @@ export async function benchmarkCommand(options: BenchmarkOptions): Promise<void>
   console.log(`  Rating:          ${rating}\n`);
 }
 
-async function pickModel(): Promise<string | null> {
-  try {
-    const res = await fetch(`${OLLAMA_API_URL}/api/tags`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) return null;
-    const data = OllamaPickModelSchema.parse(await res.json());
-    if (data.models.length === 0) return null;
-
-    // Pick smallest model for quick benchmark
-    const sorted = [...data.models].sort((a, b) => a.size - b.size);
-    return sorted[0].name;
-  } catch {
-    return null;
-  }
-}
-
-async function runInference(model: string, prompt: string): Promise<RoundResult | null> {
+async function runInference(baseUrl: string, model: string, prompt: string): Promise<RoundResult | null> {
   try {
     const startTime = performance.now();
     let firstTokenTime: number | null = null;
     let tokensGenerated = 0;
 
-    const res = await fetch(`${OLLAMA_API_URL}/api/generate`, {
+    const res = await fetch(`${baseUrl}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

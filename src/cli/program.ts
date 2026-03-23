@@ -1,13 +1,20 @@
 import { Command } from "commander";
 import { VERSION } from "../core/constants.js";
+import { loadConfig } from "../core/config.js";
 import { scanCommand } from "./commands/scan.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { modelsCommand } from "./commands/models.js";
 import { benchmarkCommand } from "./commands/benchmark.js";
 import { compareCommand } from "./commands/compare.js";
+import { profileCommand } from "./commands/profile.js";
 import type { ScanOptions, ModelCategory, OutputFormat } from "../core/types.js";
 
 export function createProgram(): Command {
+  const config = loadConfig();
+  const defaultFormat = config.defaultFormat ?? "table";
+  const defaultCategory = config.defaultCategory ?? "all";
+  const defaultTop = String(config.defaultTop ?? 5);
+
   const program = new Command();
 
   program
@@ -18,16 +25,18 @@ export function createProgram(): Command {
 
   // Default action (no subcommand) runs scan
   program
-    .option("-f, --format <format>", "Output format (table or json)", "table")
-    .option("-c, --category <category>", "Filter by category (general, coding, reasoning, creative, multilingual)", "all")
-    .option("-t, --top <n>", "Number of recommendations", "5")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-c, --category <category>", "Filter by category (general, coding, reasoning, creative, multilingual)", defaultCategory)
+    .option("-t, --top <n>", "Number of recommendations", defaultTop)
     .option("-v, --verbose", "Show detailed output", false)
+    .option("-H, --host <url>", "Ollama API host URL")
     .action(async (opts) => {
       const options: ScanOptions = {
         format: opts.format as OutputFormat,
         category: opts.category as ModelCategory | "all",
         top: parseInt(opts.top, 10),
         verbose: opts.verbose,
+        host: opts.host,
       };
       await scanCommand(options);
     });
@@ -36,16 +45,18 @@ export function createProgram(): Command {
   program
     .command("scan")
     .description("Full hardware scan + model recommendations")
-    .option("-f, --format <format>", "Output format (table or json)", "table")
-    .option("-c, --category <category>", "Filter by category", "all")
-    .option("-t, --top <n>", "Number of recommendations", "5")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-c, --category <category>", "Filter by category", defaultCategory)
+    .option("-t, --top <n>", "Number of recommendations", defaultTop)
     .option("-v, --verbose", "Show detailed output", false)
+    .option("-H, --host <url>", "Ollama API host URL")
     .action(async (opts) => {
       const options: ScanOptions = {
         format: opts.format as OutputFormat,
         category: opts.category as ModelCategory | "all",
         top: parseInt(opts.top, 10),
         verbose: opts.verbose,
+        host: opts.host,
       };
       await scanCommand(options);
     });
@@ -54,9 +65,10 @@ export function createProgram(): Command {
   program
     .command("doctor")
     .description("System health check with actionable advice")
-    .option("-f, --format <format>", "Output format (table or json)", "table")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-H, --host <url>", "Ollama API host URL")
     .action(async (opts) => {
-      await doctorCommand({ format: opts.format });
+      await doctorCommand({ format: opts.format, host: opts.host });
     });
 
   // Models command
@@ -64,11 +76,12 @@ export function createProgram(): Command {
     .command("models")
     .description("Browse model database filtered for your hardware")
     .option("-s, --search <query>", "Search models by name")
-    .option("-c, --category <category>", "Filter by category", "all")
+    .option("-c, --category <category>", "Filter by category", defaultCategory)
     .option("--fits", "Only show models that fit your hardware", false)
     .option("--live", "Include live models from Ollama", false)
     .option("--installed", "Show only installed Ollama models", false)
-    .option("-f, --format <format>", "Output format (table or json)", "table")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-H, --host <url>", "Ollama API host URL")
     .action(async (opts) => {
       await modelsCommand({
         search: opts.search,
@@ -77,6 +90,7 @@ export function createProgram(): Command {
         live: opts.live || opts.installed,
         installed: opts.installed,
         format: opts.format,
+        host: opts.host,
       });
     });
 
@@ -84,16 +98,18 @@ export function createProgram(): Command {
   program
     .command("compare [models...]")
     .description("Compare models side-by-side against your hardware")
-    .option("-f, --format <format>", "Output format (table or json)", "table")
-    .option("-c, --category <category>", "Auto-pick top models from category", "all")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-c, --category <category>", "Auto-pick top models from category", defaultCategory)
     .option("-t, --top <n>", "Number of models to compare (with --category)", "3")
     .option("-q, --quant <quant>", "Force specific quantization (e.g. Q4_K_M)")
+    .option("-H, --host <url>", "Ollama API host URL")
     .action(async (models: string[], opts) => {
       await compareCommand(models, {
         format: opts.format as OutputFormat,
         category: opts.category as ModelCategory | "all",
         top: parseInt(opts.top, 10),
         quant: opts.quant,
+        host: opts.host,
       });
     });
 
@@ -101,9 +117,10 @@ export function createProgram(): Command {
   program
     .command("monitor")
     .description("Live-updating system monitor (like htop for LLMs)")
-    .action(async () => {
+    .option("-H, --host <url>", "Ollama API host URL")
+    .action(async (opts) => {
       const { monitorCommand } = await import("./commands/monitor.js");
-      await monitorCommand();
+      await monitorCommand({ host: opts.host });
     });
 
   // Benchmark command
@@ -112,10 +129,33 @@ export function createProgram(): Command {
     .description("Run a quick inference benchmark via Ollama")
     .option("-m, --model <model>", "Model to benchmark", "")
     .option("-r, --rounds <n>", "Number of test rounds", "3")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-H, --host <url>", "Ollama API host URL")
     .action(async (opts) => {
       await benchmarkCommand({
         model: opts.model,
         rounds: parseInt(opts.rounds, 10),
+        format: opts.format as OutputFormat,
+        host: opts.host,
+      });
+    });
+
+  // Profile command
+  program
+    .command("profile")
+    .description("Run inference with hardware profiling (latency, VRAM, GPU timeline)")
+    .option("-m, --model <model>", "Model to profile", "")
+    .option("-p, --prompt <prompt>", "Custom prompt (default: short/medium/long set)")
+    .option("-c, --context-size <n>", "Context size", "2048")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-H, --host <url>", "Ollama API host URL")
+    .action(async (opts) => {
+      await profileCommand({
+        model: opts.model,
+        prompt: opts.prompt,
+        contextSize: parseInt(opts.contextSize, 10),
+        format: opts.format as OutputFormat,
+        host: opts.host,
       });
     });
 

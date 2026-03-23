@@ -35,6 +35,7 @@ export class HardwareMonitor extends EventEmitter {
   private intervalMs = 2000;
   private gpuVendor: "NVIDIA" | "AMD" | "Apple" | "unknown" = "unknown";
   private gpuModelName: string | null = null;
+  private ollamaBaseUrl: string;
 
   // Sparkline history (ring buffer of last N snapshots)
   readonly cpuHistory: number[] = [];
@@ -58,6 +59,11 @@ export class HardwareMonitor extends EventEmitter {
   private lastModel: string | null = null;
   private lastTokPerSec: number | null = null;
   private lastPollTime: number = Date.now();
+
+  constructor(ollamaHost?: string) {
+    super();
+    this.ollamaBaseUrl = ollamaHost || OLLAMA_API_URL;
+  }
 
   start(intervalMs = 2000): void {
     if (this.running) return;
@@ -292,7 +298,7 @@ export class HardwareMonitor extends EventEmitter {
 
   private async pollOllama() {
     try {
-      const res = await fetch(`${OLLAMA_API_URL}/api/ps`, {
+      const res = await fetch(`${this.ollamaBaseUrl}/api/ps`, {
         signal: AbortSignal.timeout(2000),
       });
       if (!res.ok)

@@ -6,6 +6,7 @@ import { getModelById, getModelByTag, searchModels } from "../../models/database
 import { comparisonTable } from "../ui/tables.js";
 import { sectionHeader, titleBox } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
+import { toCsv } from "../ui/csv.js";
 import { APPLE_UNIFIED_MEMORY_FACTOR } from "../../core/constants.js";
 import type {
   ModelEntry,
@@ -20,6 +21,7 @@ export interface CompareOptions {
   category: ModelCategory | "all";
   top: number;
   quant?: string;
+  host?: string;
 }
 
 export function resolveModel(query: string): ModelEntry | null {
@@ -92,7 +94,9 @@ export async function compareCommand(
   options: CompareOptions,
 ): Promise<void> {
   const isJson = options.format === "json";
-  const spinner = isJson ? null : ora({ text: "Detecting hardware...", color: "cyan" }).start();
+  const isCsv = options.format === "csv";
+  const silent = isJson || isCsv;
+  const spinner = silent ? null : ora({ text: "Detecting hardware...", color: "cyan" }).start();
 
   const hardware = await detectHardware();
   spinner?.succeed("Hardware detected");
@@ -108,11 +112,11 @@ export async function compareCommand(
   }
 
   if (scores.length < 2) {
-    if (!isJson) {
+    if (!silent) {
       console.log(`\n  ${theme.warning("Need at least 2 models to compare.")}`);
       console.log(`  ${theme.muted("Usage: llm-pulse compare <model1> <model2> [model3...]")}`);
     } else {
-      console.log(JSON.stringify({ error: "Need at least 2 models to compare" }));
+      console.log(isJson ? JSON.stringify({ error: "Need at least 2 models to compare" }) : "");
     }
     return;
   }
@@ -122,6 +126,8 @@ export async function compareCommand(
 
   if (isJson) {
     outputJson(scores, winnerIdx, availableVram);
+  } else if (isCsv) {
+    outputCsv(scores, winnerIdx, availableVram);
   } else {
     outputTable(scores, winnerIdx, availableVram);
   }
@@ -224,4 +230,19 @@ function outputJson(scores: ModelScore[], winnerIdx: number, availableVram: numb
   };
 
   console.log(JSON.stringify(output, null, 2));
+}
+
+function outputCsv(scores: ModelScore[], winnerIdx: number, availableVram: number): void {
+  const headers = [
+    "id", "name", "provider", "parametersBillion", "contextWindow",
+    "qualityTier", "quantization", "vramMb", "availableVramMb",
+    "fitLevel", "compositeScore", "speedEstimate", "isWinner",
+  ];
+  const rows = scores.map((s, i) => [
+    s.model.id, s.model.name, s.model.provider, s.model.parametersBillion,
+    s.model.contextWindow, s.model.qualityTier, s.quantization.name,
+    s.quantization.vramMb, availableVram, s.fitLevel, s.compositeScore,
+    s.speedEstimate, i === winnerIdx,
+  ]);
+  console.log(toCsv(headers, rows));
 }

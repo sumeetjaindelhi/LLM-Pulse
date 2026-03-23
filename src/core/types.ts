@@ -181,11 +181,49 @@ export interface SmartAlert {
 
 // ── CLI Options ───────────────────────────────
 
-export type OutputFormat = "table" | "json";
+export type OutputFormat = "table" | "json" | "csv";
 
 export interface ScanOptions {
   format: OutputFormat;
   category: ModelCategory | "all";
   top: number;
   verbose: boolean;
+  host?: string;
+}
+
+// ── Profile Command ──────────────────────────
+
+export interface ProfileOptions {
+  model: string;
+  prompt?: string;
+  contextSize: number;
+  format: OutputFormat;
+  host?: string;
+}
+
+export interface HardwareSnapshot {
+  timestampMs: number;
+  phase: "idle" | "prompt" | "generation" | "complete";
+  gpuUtilPercent: number | null;
+  gpuVramUsedMb: number | null;
+  gpuVramTotalMb: number | null;
+  gpuTempCelsius: number | null;
+  gpuPowerWatt: number | null;
+  cpuPercent: number | null;
+  ramUsedMb: number | null;
+}
+
+export interface ProfileResult {
+  model: string;
+  prompt: string;
+  contextSize: number;
+  ttftMs: number;
+  promptProcessMs: number;
+  generationMs: number;
+  totalMs: number;
+  tokensGenerated: number;
+  tokensPerSec: number;
+  peakVramMb: number | null;
+  avgGpuByPhase: Record<string, number | null>;
+  snapshots: HardwareSnapshot[];
 }

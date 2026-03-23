@@ -4,11 +4,15 @@ import type { OllamaModel } from "../core/types.js";
 
 let cachedModels: OllamaModel[] | null = null;
 
-export async function fetchOllamaModels(): Promise<OllamaModel[]> {
-  if (cachedModels) return cachedModels;
+export async function fetchOllamaModels(host?: string): Promise<OllamaModel[]> {
+  const baseUrl = host || OLLAMA_API_URL;
+  const isCustomHost = !!host && host !== OLLAMA_API_URL;
+
+  // Bypass cache for non-default host
+  if (!isCustomHost && cachedModels) return cachedModels;
 
   try {
-    const response = await fetch(`${OLLAMA_API_URL}/api/tags`, {
+    const response = await fetch(`${baseUrl}/api/tags`, {
       signal: AbortSignal.timeout(3000),
     });
 
@@ -16,7 +20,7 @@ export async function fetchOllamaModels(): Promise<OllamaModel[]> {
 
     const data = OllamaTagsSchema.parse(await response.json());
 
-    cachedModels = data.models.map((m) => ({
+    const models = data.models.map((m) => ({
       name: m.name,
       size: m.size,
       parameterSize: m.details?.parameter_size ?? "unknown",
@@ -24,7 +28,8 @@ export async function fetchOllamaModels(): Promise<OllamaModel[]> {
       family: m.details?.family ?? "unknown",
     }));
 
-    return cachedModels;
+    if (!isCustomHost) cachedModels = models;
+    return models;
   } catch {
     return [];
   }

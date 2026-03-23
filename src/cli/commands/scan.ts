@@ -7,21 +7,28 @@ import { titleBox, sectionHeader, keyValue, subLine } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
 import { progressBar, formatMb } from "../ui/progress.js";
 import { recommendationTable } from "../ui/tables.js";
+import { toCsv } from "../ui/csv.js";
 import { APPLE_UNIFIED_MEMORY_FACTOR } from "../../core/constants.js";
+import { resolveOllamaHost } from "../../core/config.js";
 import type { ScanOptions, HardwareProfile, RuntimeInfo } from "../../core/types.js";
 
 export async function scanCommand(options: ScanOptions): Promise<void> {
-  // JSON mode: no spinners
+  const ollamaHost = resolveOllamaHost(options.host);
+
+  // JSON/CSV mode: no spinners
   if (options.format === "json") {
-    return scanJson(options);
+    return scanJson(options, ollamaHost);
+  }
+  if (options.format === "csv") {
+    return scanCsv(options, ollamaHost);
   }
 
   const spinner = ora({ text: "Detecting hardware (CPU, GPU, RAM, disk)...", color: "cyan" }).start();
 
   const [hardware, runtimes, ollamaModels] = await Promise.all([
     detectHardware(),
-    detectAllRuntimes(),
-    fetchOllamaModels(),
+    detectAllRuntimes(ollamaHost),
+    fetchOllamaModels(ollamaHost),
   ]);
 
   spinner.succeed("Scan complete");
@@ -79,10 +86,10 @@ export async function scanCommand(options: ScanOptions): Promise<void> {
   console.log(titleBox(lines.join("\n")));
 }
 
-async function scanJson(options: ScanOptions): Promise<void> {
+async function scanJson(options: ScanOptions, ollamaHost: string): Promise<void> {
   const [hardware, runtimes] = await Promise.all([
     detectHardware(),
-    detectAllRuntimes(),
+    detectAllRuntimes(ollamaHost),
   ]);
 
   const recommendations = getRecommendations(hardware, {
@@ -106,6 +113,32 @@ async function scanJson(options: ScanOptions): Promise<void> {
   };
 
   console.log(JSON.stringify(output, null, 2));
+}
+
+async function scanCsv(options: ScanOptions, ollamaHost: string): Promise<void> {
+  const [hardware, runtimes] = await Promise.all([
+    detectHardware(),
+    detectAllRuntimes(ollamaHost),
+  ]);
+
+  const recommendations = getRecommendations(hardware, {
+    category: options.category,
+    top: options.top,
+    onlyFitting: true,
+  });
+
+  const headers = ["rank", "model", "quantization", "fitLevel", "vramMb", "compositeScore", "pullCommand"];
+  const rows = recommendations.map((r) => [
+    r.rank,
+    r.score.model.name,
+    r.score.quantization.name,
+    r.score.fitLevel,
+    r.score.quantization.vramMb,
+    r.score.compositeScore,
+    r.pullCommand,
+  ]);
+
+  console.log(toCsv(headers, rows));
 }
 
 function formatCpu(hw: HardwareProfile): string {
