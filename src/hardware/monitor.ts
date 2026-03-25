@@ -32,6 +32,7 @@ export interface MonitorSnapshot {
 export class HardwareMonitor extends EventEmitter {
   private timeout: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private polling = false; // guard against overlapping polls
   private intervalMs = 2000;
   private gpuVendor: "NVIDIA" | "AMD" | "Apple" | "unknown" = "unknown";
   private gpuModelName: string | null = null;
@@ -161,6 +162,10 @@ export class HardwareMonitor extends EventEmitter {
   private async poll(): Promise<void> {
     if (!this.running) return;
 
+    // Skip if previous poll is still running (dedup subprocess calls)
+    if (this.polling) return;
+    this.polling = true;
+
     try {
       const [cpu, mem, gpu, ollama] = await Promise.all([
         this.pollCpu(),
@@ -209,6 +214,7 @@ export class HardwareMonitor extends EventEmitter {
     } catch {
       // Swallow polling errors to keep running
     } finally {
+      this.polling = false;
       if (this.running) {
         this.timeout = setTimeout(() => this.poll(), this.intervalMs);
       }

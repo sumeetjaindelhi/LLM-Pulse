@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useReducer, useEffect, useRef, useCallback } from "react";
 import { Text, Box, useInput, useApp } from "ink";
 import { Overview } from "./Overview.js";
 import { Inference } from "./Inference.js";
@@ -49,21 +49,65 @@ const EMPTY_SESSION: SessionStats = {
   lastModelSwapAt: null,
 };
 
+// ── Reducer ──────────────────────────────────
+
+interface MonitorState {
+  snapshot: MonitorSnapshot;
+  session: SessionStats;
+  cpuHistory: number[];
+  gpuHistory: number[];
+  tokHistory: number[];
+  gpuTempHistory: number[];
+  gpuVramHistory: number[];
+  gpuPowerHistory: number[];
+}
+
+type MonitorAction = {
+  type: "tick";
+  snapshot: MonitorSnapshot;
+  session: SessionStats;
+  cpuHistory: number[];
+  gpuHistory: number[];
+  tokHistory: number[];
+  gpuTempHistory: number[];
+  gpuVramHistory: number[];
+  gpuPowerHistory: number[];
+};
+
+const initialState: MonitorState = {
+  snapshot: EMPTY_SNAPSHOT,
+  session: EMPTY_SESSION,
+  cpuHistory: [],
+  gpuHistory: [],
+  tokHistory: [],
+  gpuTempHistory: [],
+  gpuVramHistory: [],
+  gpuPowerHistory: [],
+};
+
+function monitorReducer(_state: MonitorState, action: MonitorAction): MonitorState {
+  switch (action.type) {
+    case "tick":
+      return {
+        snapshot: action.snapshot,
+        session: action.session,
+        cpuHistory: action.cpuHistory,
+        gpuHistory: action.gpuHistory,
+        tokHistory: action.tokHistory,
+        gpuTempHistory: action.gpuTempHistory,
+        gpuVramHistory: action.gpuVramHistory,
+        gpuPowerHistory: action.gpuPowerHistory,
+      };
+  }
+}
+
+// ── App ──────────────────────────────────────
+
 export function App({ host }: { host?: string }) {
   const { exit } = useApp();
-  const [snapshot, setSnapshot] = useState<MonitorSnapshot>(EMPTY_SNAPSHOT);
-  const [activeTab, setActiveTab] = useState<MonitorTab>("overview");
+  const [state, dispatch] = useReducer(monitorReducer, initialState);
+  const [activeTab, setActiveTab] = React.useState<MonitorTab>("overview");
   const ticksRef = useRef(0);
-
-  // Keep references to monitor data that updates outside React state
-  const [session, setSession] = useState<SessionStats>(EMPTY_SESSION);
-  const [cpuHistory, setCpuHistory] = useState<number[]>([]);
-  const [gpuHistory, setGpuHistory] = useState<number[]>([]);
-  const [tokHistory, setTokHistory] = useState<number[]>([]);
-  const [gpuTempHistory, setGpuTempHistory] = useState<number[]>([]);
-  const [gpuVramHistory, setGpuVramHistory] = useState<number[]>([]);
-  const [gpuPowerHistory, setGpuPowerHistory] = useState<number[]>([]);
-
   const monitorRef = useRef<HardwareMonitor | null>(null);
 
   useEffect(() => {
@@ -71,21 +115,22 @@ export function App({ host }: { host?: string }) {
     monitorRef.current = monitor;
 
     const handler = (s: MonitorSnapshot) => {
-      setSnapshot(s);
       ticksRef.current += 1;
 
-      // Copy history arrays (shallow copy for React diffing)
-      setCpuHistory([...monitor.cpuHistory]);
-      setGpuHistory([...monitor.gpuHistory]);
-      setTokHistory([...monitor.tokHistory]);
-      setGpuTempHistory([...monitor.gpuTempHistory]);
-      setGpuVramHistory([...monitor.gpuVramHistory]);
-      setGpuPowerHistory([...monitor.gpuPowerHistory]);
-
-      // Copy session stats (create new object for React diffing)
-      setSession({
-        ...monitor.session,
-        modelHistory: new Map(monitor.session.modelHistory),
+      // Single dispatch replaces 7 separate setState calls
+      dispatch({
+        type: "tick",
+        snapshot: s,
+        session: {
+          ...monitor.session,
+          modelHistory: new Map(monitor.session.modelHistory),
+        },
+        cpuHistory: [...monitor.cpuHistory],
+        gpuHistory: [...monitor.gpuHistory],
+        tokHistory: [...monitor.tokHistory],
+        gpuTempHistory: [...monitor.gpuTempHistory],
+        gpuVramHistory: [...monitor.gpuVramHistory],
+        gpuPowerHistory: [...monitor.gpuPowerHistory],
       });
     };
 
@@ -98,15 +143,19 @@ export function App({ host }: { host?: string }) {
     };
   }, []);
 
+  const handleTab = useCallback(() => {
+    setActiveTab((current) => {
+      const idx = TABS.indexOf(current);
+      return TABS[(idx + 1) % TABS.length];
+    });
+  }, []);
+
   useInput((input, key) => {
     if (input === "q") {
       exit();
     }
     if (key.tab) {
-      setActiveTab((current) => {
-        const idx = TABS.indexOf(current);
-        return TABS[(idx + 1) % TABS.length];
-      });
+      handleTab();
     }
   });
 
@@ -132,34 +181,34 @@ export function App({ host }: { host?: string }) {
       {/* Active tab content */}
       {activeTab === "overview" && (
         <Overview
-          snapshot={snapshot}
-          session={session}
-          cpuHistory={cpuHistory}
-          gpuHistory={gpuHistory}
-          tokHistory={tokHistory}
+          snapshot={state.snapshot}
+          session={state.session}
+          cpuHistory={state.cpuHistory}
+          gpuHistory={state.gpuHistory}
+          tokHistory={state.tokHistory}
         />
       )}
       {activeTab === "inference" && (
         <Inference
-          snapshot={snapshot}
-          session={session}
-          tokHistory={tokHistory}
+          snapshot={state.snapshot}
+          session={state.session}
+          tokHistory={state.tokHistory}
         />
       )}
       {activeTab === "gpu" && (
         <GpuDetail
-          snapshot={snapshot}
-          gpuHistory={gpuHistory}
-          gpuTempHistory={gpuTempHistory}
-          gpuVramHistory={gpuVramHistory}
-          gpuPowerHistory={gpuPowerHistory}
+          snapshot={state.snapshot}
+          gpuHistory={state.gpuHistory}
+          gpuTempHistory={state.gpuTempHistory}
+          gpuVramHistory={state.gpuVramHistory}
+          gpuPowerHistory={state.gpuPowerHistory}
         />
       )}
       {activeTab === "vram" && (
-        <VramMap snapshot={snapshot} />
+        <VramMap snapshot={state.snapshot} />
       )}
       {activeTab === "models" && (
-        <ModelManager snapshot={snapshot} ollamaHost={host || OLLAMA_API_URL} />
+        <ModelManager snapshot={state.snapshot} ollamaHost={host || OLLAMA_API_URL} />
       )}
 
       {/* Footer */}

@@ -25,7 +25,7 @@ function tempColor(temp: number): string {
   return temp >= 85 ? "red" : temp >= 70 ? "yellow" : "green";
 }
 
-export function GpuDetail({ snapshot, gpuHistory, gpuTempHistory, gpuVramHistory, gpuPowerHistory }: GpuDetailProps) {
+export const GpuDetail = React.memo(function GpuDetail({ snapshot, gpuHistory, gpuTempHistory, gpuVramHistory, gpuPowerHistory }: GpuDetailProps) {
   if (snapshot.gpuPercent === null) {
     return (
       <Box flexDirection="column">
@@ -138,4 +138,4 @@ export function GpuDetail({ snapshot, gpuHistory, gpuTempHistory, gpuVramHistory
       </Text>
     </Box>
   );
-}
+});

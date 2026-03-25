@@ -94,7 +94,7 @@ function renderSegmentedBar(breakdown: VramBreakdown, width: number = 44): strin
   return "\u2588".repeat(wChars) + "\u2593".repeat(kChars) + "\u2592".repeat(oChars) + "\u2591".repeat(fChars);
 }
 
-export function VramMap({ snapshot }: VramMapProps) {
+export const VramMap = React.memo(function VramMap({ snapshot }: VramMapProps) {
   const breakdown = estimateVramBreakdown(snapshot);
 
   const overheadLabel = snapshot.gpuVendor === "NVIDIA" ? "CUDA overhead"
@@ -194,4 +194,4 @@ export function VramMap({ snapshot }: VramMapProps) {
       )}
     </Box>
   );
-}
+});

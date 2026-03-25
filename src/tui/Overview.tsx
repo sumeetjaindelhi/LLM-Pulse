@@ -36,7 +36,7 @@ function formatUptime(startedAt: number): string {
   return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
-export function Overview({ snapshot, session, cpuHistory, gpuHistory, tokHistory }: OverviewProps) {
+export const Overview = React.memo(function Overview({ snapshot, session, cpuHistory, gpuHistory, tokHistory }: OverviewProps) {
   const vramPercent =
     snapshot.gpuVramUsedMb !== null && snapshot.gpuVramTotalMb !== null && snapshot.gpuVramTotalMb > 0
       ? Math.round((snapshot.gpuVramUsedMb / snapshot.gpuVramTotalMb) * 100)
@@ -133,4 +133,4 @@ export function Overview({ snapshot, session, cpuHistory, gpuHistory, tokHistory
       <AlertBar snapshot={snapshot} session={session} tokHistory={tokHistory} />
     </Box>
   );
-}
+});

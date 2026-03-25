@@ -70,7 +70,7 @@ function renderLargeChart(data: number[], width: number): string[] {
   return lines;
 }
 
-export function Inference({ snapshot, session, tokHistory }: InferenceProps) {
+export const Inference = React.memo(function Inference({ snapshot, session, tokHistory }: InferenceProps) {
   const chartWidth = 50;
   const chartLines = renderLargeChart(tokHistory, chartWidth);
   const avgTokPerSec =
@@ -145,4 +145,4 @@ export function Inference({ snapshot, session, tokHistory }: InferenceProps) {
       )}
     </Box>
   );
-}
+});

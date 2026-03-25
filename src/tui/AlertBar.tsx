@@ -120,7 +120,7 @@ function computeAlerts(snapshot: MonitorSnapshot, session: SessionStats, tokHist
   return alerts;
 }
 
-export function AlertBar({ snapshot, session, tokHistory }: AlertBarProps) {
+export const AlertBar = React.memo(function AlertBar({ snapshot, session, tokHistory }: AlertBarProps) {
   const alerts = computeAlerts(snapshot, session, tokHistory);
 
   if (alerts.length === 0) return null;
@@ -138,4 +138,4 @@ export function AlertBar({ snapshot, session, tokHistory }: AlertBarProps) {
       })}
     </Box>
   );
-}
+});

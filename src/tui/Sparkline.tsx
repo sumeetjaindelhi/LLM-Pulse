@@ -9,7 +9,7 @@ interface SparklineProps {
   color?: string;
 }
 
-export function Sparkline({ data, width = 10, color = "cyan" }: SparklineProps) {
+export const Sparkline = React.memo(function Sparkline({ data, width = 10, color = "cyan" }: SparklineProps) {
   if (data.length === 0) {
     return <Text dimColor>{"─".repeat(width)}</Text>;
   }
@@ -34,4 +34,4 @@ export function Sparkline({ data, width = 10, color = "cyan" }: SparklineProps) 
   return (
     <Text color={color}>{padStr}{chars.join("")}</Text>
   );
-}
+});

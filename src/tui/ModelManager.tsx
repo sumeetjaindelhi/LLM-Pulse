@@ -34,7 +34,7 @@ interface ModelManagerProps {
   ollamaHost: string;
 }
 
-export function ModelManager({ snapshot, ollamaHost }: ModelManagerProps) {
+export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaHost }: ModelManagerProps) {
   const [installed, setInstalled] = useState<ModelInfo[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mode, setMode] = useState<"installed" | "pull">("installed");
@@ -303,4 +303,4 @@ export function ModelManager({ snapshot, ollamaHost }: ModelManagerProps) {
       )}
     </Box>
   );
-}
+});
