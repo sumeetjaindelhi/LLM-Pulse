@@ -4,6 +4,7 @@ import type {
   RuntimeInfo,
   DiagnosticCheck,
   HealthReport,
+  FixAction,
 } from "../core/types.js";
 
 export function runDiagnostics(
@@ -85,6 +86,11 @@ export function runDiagnostics(
       severity: "warning",
       message: "AMD GPU detected but rocm-smi not found — VRAM monitoring unavailable",
       suggestion: "Install ROCm to enable GPU monitoring: https://rocm.docs.amd.com",
+      fix: process.platform === "linux" ? {
+        label: "Install ROCm",
+        command: "sudo apt install rocm-smi-lib",
+        description: "Installs ROCm SMI for AMD GPU monitoring (Ubuntu/Debian)",
+      } : undefined,
     });
   }
 
@@ -165,17 +171,53 @@ export function runDiagnostics(
     const running = runtimes.find((r) => r.status === "running");
     if (running) {
       checks.push({ label: "Runtime", severity: "pass", message: `${running.name} installed and running` });
+
+      // Check if Ollama has any models installed
+      const ollamaRuntime = runtimes.find((r) => r.name === "Ollama" && r.status === "running");
+      if (ollamaRuntime && ollamaRuntime.models.length === 0) {
+        checks.push({
+          label: "Models",
+          severity: "warning",
+          message: "Ollama is running but no models are installed",
+          suggestion: "Pull a model to get started: ollama pull llama3.2:3b",
+          fix: {
+            label: "Pull a starter model",
+            command: "ollama pull llama3.2:3b",
+            description: "Downloads Llama 3.2 3B (~2 GB) — a great starter model",
+          },
+        });
+      }
     } else {
       const installed = runtimes.find((r) => r.status !== "not_found");
-      checks.push({ label: "Runtime", severity: "pass", message: `${installed?.name ?? "Runtime"} installed` });
+      checks.push({
+        label: "Runtime",
+        severity: "warning",
+        message: `${installed?.name ?? "Runtime"} installed but not running`,
+        suggestion: `Start it with: ${installed?.name === "Ollama" ? "ollama serve" : `${installed?.name ?? "runtime"}`}`,
+        fix: installed?.name === "Ollama" ? {
+          label: "Start Ollama",
+          command: "ollama serve",
+          description: "Starts the Ollama server in the background",
+        } : undefined,
+      });
     }
     score += DOCTOR_WEIGHTS.runtimeInstalled;
   } else {
+    const installCmd = process.platform === "win32"
+      ? "winget install Ollama.Ollama"
+      : process.platform === "darwin"
+      ? "brew install ollama"
+      : "curl -fsSL https://ollama.com/install.sh | sh";
     checks.push({
       label: "Runtime",
       severity: "fail",
       message: "No LLM runtime installed",
       suggestion: "Install Ollama (easiest): https://ollama.com",
+      fix: {
+        label: "Install Ollama",
+        command: installCmd,
+        description: "Installs Ollama — the easiest way to run LLMs locally",
+      },
     });
   }
 

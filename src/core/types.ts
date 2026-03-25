@@ -126,11 +126,18 @@ export interface RuntimeInfo {
 
 export type CheckSeverity = "pass" | "warning" | "fail" | "info";
 
+export interface FixAction {
+  label: string; // e.g. "Start Ollama"
+  command: string; // e.g. "ollama serve"
+  description: string; // what the fix does
+}
+
 export interface DiagnosticCheck {
   label: string;
   severity: CheckSeverity;
   message: string;
   suggestion?: string;
+  fix?: FixAction;
 }
 
 export interface HealthReport {
@@ -142,7 +149,7 @@ export interface HealthReport {
 
 // ── Monitor ──────────────────────────────────
 
-export type MonitorTab = "overview" | "inference" | "gpu" | "vram";
+export type MonitorTab = "overview" | "inference" | "gpu" | "vram" | "models";
 
 export interface ModelUsage {
   name: string; // e.g. "llama3.1:8b"

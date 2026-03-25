@@ -4,15 +4,18 @@ import { Overview } from "./Overview.js";
 import { Inference } from "./Inference.js";
 import { GpuDetail } from "./GpuDetail.js";
 import { VramMap } from "./VramMap.js";
+import { ModelManager } from "./ModelManager.js";
 import { HardwareMonitor, type MonitorSnapshot } from "../hardware/monitor.js";
+import { OLLAMA_API_URL } from "../core/constants.js";
 import type { MonitorTab, SessionStats } from "../core/types.js";
 
-const TABS: MonitorTab[] = ["overview", "inference", "gpu", "vram"];
+const TABS: MonitorTab[] = ["overview", "inference", "gpu", "vram", "models"];
 const TAB_LABELS: Record<MonitorTab, string> = {
   overview: "Overview",
   inference: "Inference",
   gpu: "GPU",
   vram: "VRAM",
+  models: "Models",
 };
 
 const EMPTY_SNAPSHOT: MonitorSnapshot = {
@@ -154,6 +157,9 @@ export function App({ host }: { host?: string }) {
       )}
       {activeTab === "vram" && (
         <VramMap snapshot={snapshot} />
+      )}
+      {activeTab === "models" && (
+        <ModelManager snapshot={snapshot} ollamaHost={host || OLLAMA_API_URL} />
       )}
 
       {/* Footer */}
