@@ -234,3 +234,14 @@ export interface ProfileResult {
   avgGpuByPhase: Record<string, number | null>;
   snapshots: HardwareSnapshot[];
 }
+
+// ── Check Command ────────────────────────────
+
+export type Verdict = "yes" | "maybe" | "no";
+
+export interface CheckOptions {
+  quant?: string;
+  format: OutputFormat;
+  verbose: boolean;
+  host?: string;
+}

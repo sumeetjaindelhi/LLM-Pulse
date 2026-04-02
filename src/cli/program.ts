@@ -6,8 +6,9 @@ import { doctorCommand } from "./commands/doctor.js";
 import { modelsCommand } from "./commands/models.js";
 import { benchmarkCommand } from "./commands/benchmark.js";
 import { compareCommand } from "./commands/compare.js";
+import { checkCommand } from "./commands/check.js";
 import { profileCommand } from "./commands/profile.js";
-import type { ScanOptions, ModelCategory, OutputFormat } from "../core/types.js";
+import type { ScanOptions, ModelCategory, OutputFormat, CheckOptions } from "../core/types.js";
 
 export function createProgram(): Command {
   const config = loadConfig();
@@ -112,6 +113,24 @@ export function createProgram(): Command {
         quant: opts.quant,
         host: opts.host,
       });
+    });
+
+  // Check command
+  program
+    .command("check <model>")
+    .description("Check if your hardware can run a specific model")
+    .option("-q, --quant <name>", "Check specific quantization (e.g. Q4_K_M)")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-v, --verbose", "Show extra details", false)
+    .option("-H, --host <url>", "Ollama API host URL")
+    .action(async (model: string, opts) => {
+      const options: CheckOptions = {
+        quant: opts.quant,
+        format: opts.format as OutputFormat,
+        verbose: opts.verbose,
+        host: opts.host,
+      };
+      await checkCommand(model, options);
     });
 
   // Monitor command
