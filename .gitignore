@@ -9,4 +9,5 @@ package-lock.json
 ARCHITECTURE.md
 CLAUDE.md
 *.md
+!README.md
 *.yml
