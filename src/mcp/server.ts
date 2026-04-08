@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { detectHardware } from "../hardware/index.js";
 import { clearHardwareCache } from "../hardware/index.js";
+import { HardwareMonitor } from "../hardware/monitor.js";
 import { detectAllRuntimes } from "../runtimes/index.js";
 import { getAllModels, searchModels, filterByCategory, resolveModel } from "../models/database.js";
 import { fetchOllamaModels, clearOllamaCache } from "../models/ollama-models.js";
@@ -329,6 +330,29 @@ server.tool(
           text: JSON.stringify({ count: result.length, models: result }, null, 2),
         }],
       };
+    } catch (err) {
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],
+      };
+    }
+  },
+);
+
+// ── monitor ──────────────────────────────────────────
+server.tool(
+  "monitor",
+  "Take a one-shot snapshot of live hardware state — CPU/GPU utilization, VRAM usage, temperature, power, and active Ollama model with tokens/sec",
+  {
+    host: z.string().optional().describe("Ollama API host URL (default: http://127.0.0.1:11434)"),
+  },
+  async ({ host }) => {
+    try {
+      const ollamaHost = resolveOllamaHost(host);
+      const monitor = new HardwareMonitor(ollamaHost);
+      const snapshot = await monitor.takeSnapshot();
+
+      return { content: [{ type: "text" as const, text: JSON.stringify(snapshot, null, 2) }] };
     } catch (err) {
       return {
         isError: true,

@@ -159,6 +159,48 @@ export class HardwareMonitor extends EventEmitter {
     this.lastTokPerSec = snapshot.tokensPerSec;
   }
 
+  private async gatherSnapshot(): Promise<MonitorSnapshot> {
+    const [cpu, mem, gpu, ollama] = await Promise.all([
+      this.pollCpu(),
+      this.pollMemory(),
+      this.pollGpu(),
+      this.pollOllama(),
+    ]);
+
+    return {
+      cpuPercent: cpu.percent,
+      cpuTemp: cpu.temp,
+      gpuPercent: gpu.percent,
+      gpuTemp: gpu.temp,
+      gpuVramUsedMb: gpu.vramUsedMb,
+      gpuVramTotalMb: gpu.vramTotalMb,
+      gpuPowerWatt: gpu.powerWatt,
+      gpuClockMhz: gpu.clockMhz,
+      ramUsedMb: mem.usedMb,
+      ramTotalMb: mem.totalMb,
+      ramPercent: mem.percent,
+      gpuVendor: this.gpuVendor === "unknown" ? null : this.gpuVendor,
+      gpuModel: this.gpuModelName,
+      activeModel: ollama.model,
+      tokensPerSec: ollama.tokensPerSec,
+      modelSize: ollama.modelSize,
+      modelQuantization: ollama.modelQuantization,
+      modelContextLength: ollama.contextLength,
+      modelMaxContext: ollama.maxContext,
+    };
+  }
+
+  /**
+   * One-shot snapshot — for request/response consumers (e.g. MCP tools).
+   * Does NOT start the polling loop, mutate session state, or emit events.
+   */
+  async takeSnapshot(): Promise<MonitorSnapshot> {
+    if (this.gpuVendor === "unknown") {
+      await this.detectGpuVendor();
+    }
+    return this.gatherSnapshot();
+  }
+
   private async poll(): Promise<void> {
     if (!this.running) return;
 
@@ -167,34 +209,7 @@ export class HardwareMonitor extends EventEmitter {
     this.polling = true;
 
     try {
-      const [cpu, mem, gpu, ollama] = await Promise.all([
-        this.pollCpu(),
-        this.pollMemory(),
-        this.pollGpu(),
-        this.pollOllama(),
-      ]);
-
-      const snapshot: MonitorSnapshot = {
-        cpuPercent: cpu.percent,
-        cpuTemp: cpu.temp,
-        gpuPercent: gpu.percent,
-        gpuTemp: gpu.temp,
-        gpuVramUsedMb: gpu.vramUsedMb,
-        gpuVramTotalMb: gpu.vramTotalMb,
-        gpuPowerWatt: gpu.powerWatt,
-        gpuClockMhz: gpu.clockMhz,
-        ramUsedMb: mem.usedMb,
-        ramTotalMb: mem.totalMb,
-        ramPercent: mem.percent,
-        gpuVendor: this.gpuVendor === "unknown" ? null : this.gpuVendor,
-        gpuModel: this.gpuModelName,
-        activeModel: ollama.model,
-        tokensPerSec: ollama.tokensPerSec,
-        modelSize: ollama.modelSize,
-        modelQuantization: ollama.modelQuantization,
-        modelContextLength: ollama.contextLength,
-        modelMaxContext: ollama.maxContext,
-      };
+      const snapshot = await this.gatherSnapshot();
 
       // Update histories
       this.pushHistory(this.cpuHistory, snapshot.cpuPercent);
