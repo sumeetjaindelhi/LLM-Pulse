@@ -6,7 +6,30 @@ import type {
   ModelScore,
   FitLevel,
   ModelCategory,
+  Verdict,
 } from "../core/types.js";
+
+export function deriveVerdict(fitLevel: FitLevel): Verdict {
+  switch (fitLevel) {
+    case "excellent":
+    case "comfortable":
+      return "yes";
+    case "tight":
+    case "barely":
+      return "maybe";
+    case "cannot_run":
+      return "no";
+  }
+}
+
+export function getAvailableVram(hardware: HardwareProfile): number {
+  if (hardware.primaryGpu) {
+    return hardware.primaryGpu.vendor === "Apple"
+      ? Math.round(hardware.primaryGpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR)
+      : hardware.primaryGpu.vramMb;
+  }
+  return hardware.memory.availableMb;
+}
 
 export function classifyFit(availableVramMb: number, requiredVramMb: number): FitLevel {
   if (requiredVramMb <= 0) return "excellent";

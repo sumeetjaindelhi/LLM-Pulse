@@ -4,6 +4,22 @@ import { dirname, join, resolve } from "node:path";
 import { ModelDatabaseSchema } from "./schema.js";
 import type { ModelEntry, ModelCategory } from "../core/types.js";
 
+export function resolveModel(query: string): ModelEntry | null {
+  // 1. Exact ID match
+  const byId = getModelById(query);
+  if (byId) return byId;
+
+  // 2. Exact Ollama tag match
+  const byTag = getModelByTag(query);
+  if (byTag) return byTag;
+
+  // 3. Search — only if exactly 1 result
+  const results = searchModels(query);
+  if (results.length === 1) return results[0];
+
+  return null;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 

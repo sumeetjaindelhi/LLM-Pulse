@@ -1,45 +1,20 @@
 import ora from "ora";
 import Table from "cli-table3";
 import { detectHardware } from "../../hardware/index.js";
-import { scoreModel } from "../../analysis/scorer.js";
-import { resolveModel } from "./compare.js";
-import { searchModels } from "../../models/database.js";
+import { scoreModel, deriveVerdict, getAvailableVram } from "../../analysis/scorer.js";
+import { resolveModel, searchModels } from "../../models/database.js";
 import { titleBox, sectionHeader, keyValue, subLine } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
 import { fitBadge } from "../ui/badges.js";
 import { formatMb } from "../ui/progress.js";
 import { toCsv } from "../ui/csv.js";
-import { APPLE_UNIFIED_MEMORY_FACTOR } from "../../core/constants.js";
 import type {
   ModelEntry,
   ModelScore,
   HardwareProfile,
-  FitLevel,
   Verdict,
   CheckOptions,
 } from "../../core/types.js";
-
-export function deriveVerdict(fitLevel: FitLevel): Verdict {
-  switch (fitLevel) {
-    case "excellent":
-    case "comfortable":
-      return "yes";
-    case "tight":
-    case "barely":
-      return "maybe";
-    case "cannot_run":
-      return "no";
-  }
-}
-
-function getAvailableVram(hardware: HardwareProfile): number {
-  if (hardware.primaryGpu) {
-    return hardware.primaryGpu.vendor === "Apple"
-      ? Math.round(hardware.primaryGpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR)
-      : hardware.primaryGpu.vramMb;
-  }
-  return hardware.memory.availableMb;
-}
 
 function formatContext(ctx: number): string {
   if (ctx >= 1_000_000) return `${(ctx / 1_000_000).toFixed(1)}M tokens`;

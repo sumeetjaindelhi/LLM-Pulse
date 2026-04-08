@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveModel } from "../../src/cli/commands/compare.js";
+import { resolveModel } from "../../src/models/database.js";
 import { scoreModel } from "../../src/analysis/scorer.js";
 import { getRecommendations } from "../../src/analysis/recommender.js";
 import type { HardwareProfile, ModelEntry, ModelScore } from "../../src/core/types.js";

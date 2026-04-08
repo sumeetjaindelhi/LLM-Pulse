@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { deriveVerdict } from "../../src/cli/commands/check.js";
-import { resolveModel } from "../../src/cli/commands/compare.js";
-import { scoreModel } from "../../src/analysis/scorer.js";
-import { getModelById, searchModels } from "../../src/models/database.js";
+import { scoreModel, deriveVerdict } from "../../src/analysis/scorer.js";
+import { resolveModel, getModelById, searchModels } from "../../src/models/database.js";
 import type { HardwareProfile, FitLevel } from "../../src/core/types.js";
 import highEnd from "../fixtures/hardware-profiles/high-end-nvidia.json";
 import cpuOnly from "../fixtures/hardware-profiles/cpu-only.json";

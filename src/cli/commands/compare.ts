@@ -1,13 +1,12 @@
 import ora from "ora";
 import { detectHardware } from "../../hardware/index.js";
-import { scoreModel } from "../../analysis/scorer.js";
+import { scoreModel, getAvailableVram } from "../../analysis/scorer.js";
 import { getRecommendations } from "../../analysis/recommender.js";
-import { getModelById, getModelByTag, searchModels } from "../../models/database.js";
+import { resolveModel, searchModels } from "../../models/database.js";
 import { comparisonTable } from "../ui/tables.js";
 import { sectionHeader, titleBox } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
 import { toCsv } from "../ui/csv.js";
-import { APPLE_UNIFIED_MEMORY_FACTOR } from "../../core/constants.js";
 import type {
   ModelEntry,
   ModelScore,
@@ -22,22 +21,6 @@ export interface CompareOptions {
   top: number;
   quant?: string;
   host?: string;
-}
-
-export function resolveModel(query: string): ModelEntry | null {
-  // 1. Exact ID match
-  const byId = getModelById(query);
-  if (byId) return byId;
-
-  // 2. Exact Ollama tag match
-  const byTag = getModelByTag(query);
-  if (byTag) return byTag;
-
-  // 3. Search — only if exactly 1 result
-  const results = searchModels(query);
-  if (results.length === 1) return results[0];
-
-  return null;
 }
 
 function pickBestScore(
@@ -58,15 +41,6 @@ function pickBestScore(
     .sort((a, b) => b.compositeScore - a.compositeScore);
 
   return scores[0];
-}
-
-function getAvailableVram(hardware: HardwareProfile): number {
-  if (hardware.primaryGpu) {
-    return hardware.primaryGpu.vendor === "Apple"
-      ? Math.round(hardware.primaryGpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR)
-      : hardware.primaryGpu.vramMb;
-  }
-  return hardware.memory.availableMb;
 }
 
 function findWinner(scores: ModelScore[]): number {

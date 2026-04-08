@@ -1,6 +1,6 @@
 {
   "name": "llm-pulse",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Zero-config CLI for monitoring your local LLM hardware, runtimes, and model compatibility",
   "type": "module",
   "main": "dist/src/index.js",
@@ -12,7 +12,8 @@
     }
   },
   "bin": {
-    "llm-pulse": "dist/bin/llm-pulse.js"
+    "llm-pulse": "dist/bin/llm-pulse.js",
+    "llm-pulse-mcp": "dist/bin/llm-pulse-mcp.js"
   },
   "files": [
     "dist/",
@@ -39,7 +40,8 @@
     "ai",
     "cli",
     "terminal",
-    "tui"
+    "tui",
+    "mcp"
   ],
   "author": "sumeetjaindelhi",
   "license": "MIT",
@@ -52,6 +54,7 @@
     "url": "https://github.com/sumeetjaindelhi/LLM-Pulse/issues"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "boxen": "^8.0.1",
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
