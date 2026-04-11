@@ -144,9 +144,17 @@ async function scanCsv(options: ScanOptions, ollamaHost: string): Promise<void> 
 function formatCpu(hw: HardwareProfile): string {
   const c = hw.cpu;
   const avx = c.hasAvx2 ? theme.pass("AVX2 ✓") : theme.warning("No AVX2");
+  // Speed may be null on Apple Silicon (systeminformation can't read it).
+  // Show the accelerator class instead of a bogus GHz value.
+  let speedLabel: string;
+  if (c.speed === null) {
+    speedLabel = hw.primaryGpu?.acceleratorType === "metal" ? "Metal" : "—";
+  } else {
+    speedLabel = `${c.speed} GHz`;
+  }
   const lines = [
     keyValue("CPU", c.brand),
-    subLine(`${c.threads} threads · ${avx} · ${c.speed} GHz`),
+    subLine(`${c.threads} threads · ${avx} · ${speedLabel}`),
   ];
   return lines.join("\n");
 }

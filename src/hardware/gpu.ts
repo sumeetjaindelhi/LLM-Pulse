@@ -1,6 +1,21 @@
 import si from "systeminformation";
 import { execa } from "execa";
+import { retry } from "./retry.js";
 import type { GpuInfo } from "../core/types.js";
+
+// Retry on transient failures (driver contention under load). Skip retry when
+// the binary itself is missing (ENOENT) — waiting won't make it appear. Total
+// worst-case sleep on a retry storm: 50 + 100 = 150ms, plus each attempt's
+// 5s execa timeout budget.
+const SMI_RETRY = {
+  attempts: 3,
+  delayMs: 50,
+  backoff: 2,
+  shouldRetry: (err: unknown) => {
+    const code = (err as { code?: string })?.code;
+    return code !== "ENOENT";
+  },
+} as const;
 
 interface NvidiaSmiResult {
   vramTotalMb: number;
@@ -54,13 +69,16 @@ export function parseRocmCsv(stdout: string): RocmGpuStats {
 }
 
 async function parseNvidiaSmi(): Promise<NvidiaSmiResult | null> {
-  try {
+  // Wrap the nvidia-smi call in retry() — nvidia-smi can transiently fail
+  // when the GPU is under heavy load (driver contention). 3 attempts with
+  // 100/200ms backoff, total worst-case extra latency ~300ms.
+  return retry(async () => {
     const { stdout } = await execa("nvidia-smi", [
       "--query-gpu=memory.total,memory.used,utilization.gpu,temperature.gpu,driver_version",
       "--format=csv,noheader,nounits",
     ], { timeout: 5000 });
 
-    // Also get CUDA version from nvidia-smi header
+    // Also get CUDA version from nvidia-smi header (best-effort, non-fatal).
     let cudaVersion = "";
     try {
       const { stdout: header } = await execa("nvidia-smi", [], { timeout: 5000 });
@@ -77,7 +95,11 @@ async function parseNvidiaSmi(): Promise<NvidiaSmiResult | null> {
 
     const vramTotalMb = parseInt(vramTotal, 10);
     const vramUsedMb = parseInt(vramUsed, 10);
-    if (isNaN(vramTotalMb) || isNaN(vramUsedMb)) return null;
+    if (isNaN(vramTotalMb) || isNaN(vramUsedMb)) {
+      // Throw so retry() treats this as a retryable failure — better than
+      // returning null on the first attempt, which would commit to "no GPU".
+      throw new Error("nvidia-smi returned unparseable output");
+    }
 
     return {
       vramTotalMb,
@@ -87,13 +109,12 @@ async function parseNvidiaSmi(): Promise<NvidiaSmiResult | null> {
       driverVersion: driver,
       cudaVersion,
     };
-  } catch {
-    return null;
-  }
+  }, SMI_RETRY);
 }
 
 async function parseRocmSmi(): Promise<RocmSmiResult | null> {
-  try {
+  // Same retry treatment as nvidia-smi — rocm-smi is known to flake under load.
+  return retry(async () => {
     const { stdout } = await execa("rocm-smi", [
       "--showmeminfo", "vram",
       "--showtemp",
@@ -102,9 +123,11 @@ async function parseRocmSmi(): Promise<RocmSmiResult | null> {
     ], { timeout: 5000 });
 
     const stats = parseRocmCsv(stdout);
-    if (stats.vramTotalMb === 0) return null;
+    if (stats.vramTotalMb === 0) {
+      throw new Error("rocm-smi reported 0 total VRAM");
+    }
 
-    // Get ROCm version
+    // Get ROCm version (best-effort, non-fatal).
     let rocmVersion = "";
     try {
       const { stdout: versionOut } = await execa("rocm-smi", ["--showversion"], { timeout: 5000 });
@@ -116,9 +139,7 @@ async function parseRocmSmi(): Promise<RocmSmiResult | null> {
     }
 
     return { ...stats, rocmVersion };
-  } catch {
-    return null;
-  }
+  }, SMI_RETRY);
 }
 
 export async function detectGpus(): Promise<GpuInfo[]> {

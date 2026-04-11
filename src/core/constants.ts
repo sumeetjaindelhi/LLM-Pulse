@@ -73,11 +73,13 @@ export const EXPECTED_TOK_PER_SEC: Record<string, Record<string, number>> = {
   "24": { "3": 100, "7": 65, "8": 60, "13": 45, "34": 20, "70": 8 },
 } as const;
 
-export const LMSTUDIO_PATHS = {
-  win32: [
-    `${process.env.LOCALAPPDATA || ""}/LM Studio`,
-    `${process.env.PROGRAMFILES || ""}/LM Studio`,
-  ],
+// LM Studio install-location hints. Non-absolute paths are prefixed with an
+// env-var name (or the sentinel `HOME`, which resolves via `os.homedir()`).
+// Resolution happens in `src/runtimes/lmstudio.ts` and refuses to build a path
+// when the env var is missing — this prevents the old bug where an unset
+// LOCALAPPDATA would produce `/LM Studio` at the filesystem root.
+export const LMSTUDIO_PATH_HINTS = {
+  win32: ["LOCALAPPDATA/LM Studio", "PROGRAMFILES/LM Studio"],
   darwin: ["/Applications/LM Studio.app"],
-  linux: ["/opt/lm-studio", `${process.env.HOME || ""}/.local/share/lm-studio`],
+  linux: ["/opt/lm-studio", "HOME/.local/share/lm-studio"],
 } as const;

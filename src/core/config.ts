@@ -2,15 +2,20 @@ import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { OLLAMA_API_URL } from "./constants.js";
+import { OLLAMA_API_URL, LMSTUDIO_API_URL } from "./constants.js";
 
+// passthrough(): unknown keys are preserved rather than rejected. This gives
+// forward/backward compatibility — a config written for a future version won't
+// trip an "Invalid config" warning on an older llm-pulse binary. Trade-off:
+// typos in known keys (e.g. `ollamHost`) are silently ignored. The tool's
+// existing documented keys are the surface users should reach for.
 const ConfigSchema = z.object({
   ollamaHost: z.string().url().optional(),
   lmstudioHost: z.string().url().optional(),
   defaultFormat: z.enum(["table", "json", "csv"]).optional(),
   defaultCategory: z.enum(["general", "coding", "reasoning", "creative", "multilingual", "all"]).optional(),
   defaultTop: z.number().int().min(1).max(50).optional(),
-}).strict();
+}).passthrough();
 
 export type LlmPulseConfig = z.infer<typeof ConfigSchema>;
 
@@ -65,4 +70,17 @@ export function resolveOllamaHost(cliHost?: string): string {
   const config = getConfig();
   if (config.ollamaHost) return config.ollamaHost.replace(/\/+$/, "");
   return OLLAMA_API_URL;
+}
+
+/** Resolve LM Studio host URL. Priority: CLI flag > config > default constant.
+ *
+ * Mirrors `resolveOllamaHost` — previously the `lmstudioHost` field in the
+ * config schema was silently ignored because nothing ever consulted it. This
+ * function makes the config field actually functional.
+ */
+export function resolveLmStudioHost(cliHost?: string): string {
+  if (cliHost) return cliHost.replace(/\/+$/, "");
+  const config = getConfig();
+  if (config.lmstudioHost) return config.lmstudioHost.replace(/\/+$/, "");
+  return LMSTUDIO_API_URL;
 }

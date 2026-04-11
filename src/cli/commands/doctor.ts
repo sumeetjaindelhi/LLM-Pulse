@@ -89,17 +89,42 @@ export async function doctorCommand(options: { format?: string; host?: string; f
   console.log();
 }
 
+// Defense-in-depth: even though every FixAction literal today is a hardcoded
+// constant in src/analysis/doctor.ts, the TS type system can't enforce that
+// across future refactors. If FixAction ever gets populated from config or an
+// API, this allowlist blocks arbitrary command execution at the exec boundary.
+const ALLOWED_FIX_BINARIES = new Set([
+  "ollama",
+  "brew",
+  "winget",
+  "sudo",
+  "apt",
+  "sh",
+]);
+
 async function runFixes(fixes: FixAction[]): Promise<void> {
   for (const fix of fixes) {
     const spinner = ora({ text: `${fix.label}: ${fix.description}`, color: "cyan" }).start();
 
     try {
-      const parts = fix.command.split(" ");
-      const cmd = parts[0];
-      const args = parts.slice(1);
+      // Use the structured argv, not a naive split of `fix.command`. The
+      // display-only `command` string may contain shell pipes (e.g. the Linux
+      // curl | sh installer) that would break if split by spaces.
+      if (!fix.argv || fix.argv.length === 0) {
+        spinner.fail(`${fix.label}: Failed — malformed fix (no argv)`);
+        continue;
+      }
+      const cmd = fix.argv[0];
+      if (!ALLOWED_FIX_BINARIES.has(cmd)) {
+        spinner.fail(
+          `${fix.label}: Blocked — "${cmd}" is not in the fix-runner allowlist`,
+        );
+        continue;
+      }
+      const args = fix.argv.slice(1);
 
-      // For background services like "ollama serve", spawn detached
-      if (fix.command === "ollama serve") {
+      // For background services like `ollama serve`, spawn detached and verify.
+      if (cmd === "ollama" && args[0] === "serve") {
         const child = execa(cmd, args, {
           detached: true,
           stdio: "ignore",
@@ -110,7 +135,7 @@ async function runFixes(fixes: FixAction[]): Promise<void> {
 
         // Verify it started
         try {
-          const res = await fetch("http://127.0.0.1:11434/api/version", {
+          const res = await fetch(`${resolveOllamaHost()}/api/version`, {
             signal: AbortSignal.timeout(3000),
           });
           if (res.ok) {

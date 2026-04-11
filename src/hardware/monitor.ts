@@ -36,6 +36,10 @@ export class HardwareMonitor extends EventEmitter {
   private intervalMs = 2000;
   private gpuVendor: "NVIDIA" | "AMD" | "Apple" | "unknown" = "unknown";
   private gpuModelName: string | null = null;
+  // Cached on Apple Silicon only: total unified memory, used as the GPU's
+  // effective "total VRAM" since ioreg's PerformanceStatistics doesn't expose
+  // a total VRAM figure for Apple Silicon.
+  private appleVramTotalMb: number | null = null;
   private ollamaBaseUrl: string;
 
   // Sparkline history (ring buffer of last N snapshots)
@@ -46,6 +50,12 @@ export class HardwareMonitor extends EventEmitter {
   readonly gpuVramHistory: number[] = [];
   readonly gpuPowerHistory: number[] = [];
   private readonly maxHistory = ALERT_THRESHOLDS.sparklineHistory;
+  // Cap on session.modelHistory entries — prevents unbounded growth over
+  // long-running monitor sessions. 50 is roomy for realistic usage (active
+  // developers typically cycle through 10-20 quants max) while keeping the
+  // per-tick React state copy O(1) bounded. Eviction is FIFO via JS Map's
+  // insertion-order iteration.
+  private readonly maxModelHistory = 50;
 
   // Session tracking
   readonly session: SessionStats = {
@@ -88,7 +98,18 @@ export class HardwareMonitor extends EventEmitter {
         const v = (c.vendor || "").toLowerCase();
         if (v.includes("nvidia")) { this.gpuVendor = "NVIDIA"; this.gpuModelName = c.model; return; }
         if (v.includes("amd") || v.includes("advanced micro")) { this.gpuVendor = "AMD"; this.gpuModelName = c.model; return; }
-        if (v.includes("apple")) { this.gpuVendor = "Apple"; this.gpuModelName = c.model; return; }
+        if (v.includes("apple")) {
+          this.gpuVendor = "Apple";
+          this.gpuModelName = c.model;
+          // Cache total system memory as the Apple GPU's effective VRAM.
+          try {
+            const mem = await si.mem();
+            this.appleVramTotalMb = Math.round(mem.total / (1024 * 1024));
+          } catch {
+            // leave as null; pollGpuApple will report null vramTotalMb
+          }
+          return;
+        }
       }
     } catch {
       // keep "unknown"
@@ -101,6 +122,9 @@ export class HardwareMonitor extends EventEmitter {
       clearTimeout(this.timeout);
       this.timeout = null;
     }
+    // Release the modelHistory Map so long-running processes that stop and
+    // restart monitors don't accumulate state across sessions.
+    this.session.modelHistory.clear();
   }
 
   private pushHistory(arr: number[], value: number | null): void {
@@ -110,7 +134,13 @@ export class HardwareMonitor extends EventEmitter {
 
   private updateSession(snapshot: MonitorSnapshot): void {
     const now = Date.now();
-    const elapsed = now - this.lastPollTime;
+    // Cap elapsed at 1.5× the poll interval. Without this cap, a skipped poll
+    // (gatherSnapshot took >interval due to slow ioreg/fetch) gives elapsed=4s+
+    // and multiplying the instantaneous tokensPerSec by that inflates the
+    // token count. Ollama's /api/ps reports the LAST-KNOWN rate, not a rolling
+    // average, so over-counting also happens when the model goes idle between
+    // prompts. The cap bounds the error to ~1 interval per incident.
+    const elapsed = Math.min(now - this.lastPollTime, this.intervalMs * 1.5);
     this.lastPollTime = now;
 
     // Detect model swap
@@ -129,6 +159,12 @@ export class HardwareMonitor extends EventEmitter {
 
       let usage = this.session.modelHistory.get(snapshot.activeModel);
       if (!usage) {
+        // FIFO-evict the oldest entry if we're at the cap. JS Map preserves
+        // insertion order, so the first key is the oldest.
+        if (this.session.modelHistory.size >= this.maxModelHistory) {
+          const oldest = this.session.modelHistory.keys().next().value;
+          if (oldest !== undefined) this.session.modelHistory.delete(oldest);
+        }
         usage = {
           name: snapshot.activeModel,
           avgTokPerSec: 0,
@@ -250,7 +286,10 @@ export class HardwareMonitor extends EventEmitter {
   private async pollMemory() {
     const mem = await si.mem();
     const totalMb = Math.max(Math.round(mem.total / (1024 * 1024)), 1);
-    const usedMb = Math.round(mem.used / (1024 * 1024));
+    const availableMb = Math.round(mem.available / (1024 * 1024));
+    // Match detectMemory() semantics: exclude reclaimable buffcache from "used"
+    // so the TUI RAM bar agrees with the scan output.
+    const usedMb = Math.max(0, totalMb - availableMb);
     return {
       totalMb,
       usedMb,
@@ -263,6 +302,10 @@ export class HardwareMonitor extends EventEmitter {
 
     if (this.gpuVendor === "AMD") {
       return this.pollGpuAmd();
+    }
+
+    if (this.gpuVendor === "Apple") {
+      return this.pollGpuApple();
     }
 
     // NVIDIA (default) — also used when vendor is unknown as a first attempt
@@ -314,6 +357,57 @@ export class HardwareMonitor extends EventEmitter {
       };
     } catch {
       return nullResult;
+    }
+  }
+
+  /**
+   * Apple Silicon GPU poll via `ioreg -c AGXAccelerator`. No sudo required.
+   *
+   * The `PerformanceStatistics` dict exposes live metrics like:
+   *   "Device Utilization %"=27
+   *   "In use system memory"=1439367168
+   *   "Alloc system memory"=2774810624
+   * (verified live on an M5 Pro, macOS 15.x — all on one line, no spaces
+   * around `=`; the regex tolerates both).
+   *
+   * GPU temperature, clock, and power aren't in this dict — those live in the
+   * `IOReportLegend` channels which require more elaborate parsing. We return
+   * null for what we can't read (honest "unknown") rather than guess.
+   */
+  private async pollGpuApple() {
+    const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null };
+    try {
+      const { stdout } = await execa(
+        "ioreg",
+        ["-r", "-d", "1", "-w", "0", "-c", "AGXAccelerator"],
+        { timeout: 3000 },
+      );
+      const statsMatch = stdout.match(/"PerformanceStatistics"\s*=\s*\{([\s\S]*?)\}/);
+      if (!statsMatch) return { ...nullResult, vramTotalMb: this.appleVramTotalMb };
+      const block = statsMatch[1];
+      const readNum = (pattern: RegExp): number | null => {
+        const m = block.match(pattern);
+        if (!m) return null;
+        const n = parseInt(m[1], 10);
+        return Number.isNaN(n) ? null : n;
+      };
+      // `\s*%?` tolerates both "Device Utilization" and "Device Utilization %"
+      // variants seen across macOS versions.
+      const utilPercent = readNum(/"Device Utilization\s*%?"\s*=\s*(\d+)/);
+      const inUseBytes = readNum(/"In use system memory"\s*=\s*(\d+)/);
+      return {
+        percent: utilPercent,
+        temp: null,
+        vramUsedMb: inUseBytes !== null ? Math.round(inUseBytes / (1024 * 1024)) : null,
+        // Report the cached unified-memory total as the GPU's "total VRAM" —
+        // architecturally accurate on Apple Silicon (Metal can address all
+        // system RAM). If detectGpuVendor couldn't read si.mem(), this is null.
+        vramTotalMb: this.appleVramTotalMb,
+        powerWatt: null,
+        clockMhz: null,
+      };
+    } catch {
+      return { ...nullResult, vramTotalMb: this.appleVramTotalMb };
     }
   }
 

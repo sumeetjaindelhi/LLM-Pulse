@@ -3,11 +3,14 @@ import { detectLlamaCpp } from "./llamacpp.js";
 import { detectLmStudio } from "./lmstudio.js";
 import type { RuntimeInfo } from "../core/types.js";
 
-export async function detectAllRuntimes(ollamaHost?: string): Promise<RuntimeInfo[]> {
+export async function detectAllRuntimes(
+  ollamaHost?: string,
+  lmstudioHost?: string,
+): Promise<RuntimeInfo[]> {
   const results = await Promise.allSettled([
     detectOllama(ollamaHost),
     detectLlamaCpp(),
-    detectLmStudio(),
+    detectLmStudio(lmstudioHost),
   ]);
 
   return results.map((r, i) => {

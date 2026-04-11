@@ -5,6 +5,7 @@ import type { HardwareProfile, ModelEntry, QuantizationVariant } from "../../src
 import highEnd from "../fixtures/hardware-profiles/high-end-nvidia.json";
 import cpuOnly from "../fixtures/hardware-profiles/cpu-only.json";
 import appleM2 from "../fixtures/hardware-profiles/apple-m2.json";
+import windowsNvidia from "../fixtures/hardware-profiles/windows-nvidia.json";
 
 const dummyModel: ModelEntry = {
   id: "test-7b",
@@ -74,6 +75,14 @@ describe("scoreModel", () => {
     expect(score.speedEstimate).toBe("fast");
   });
 });
+
+  it("scores windows-nvidia RTX 4090 as excellent fit for 7B Q4", () => {
+    const q4 = dummyModel.quantizations[0]; // 4500 MB needed
+    const score = scoreModel(dummyModel, q4, windowsNvidia as HardwareProfile);
+    // 24576 MB VRAM / 4500 MB needed = 5.46 ratio → excellent
+    expect(score.fitLevel).toBe("excellent");
+    expect(score.speedEstimate).toBe("fast");
+  });
 
   it("applies Apple unified memory 0.75 factor", () => {
     const q4 = dummyModel.quantizations[0]; // 4500 MB needed

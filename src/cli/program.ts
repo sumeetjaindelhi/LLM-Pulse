@@ -8,13 +8,18 @@ import { benchmarkCommand } from "./commands/benchmark.js";
 import { compareCommand } from "./commands/compare.js";
 import { checkCommand } from "./commands/check.js";
 import { profileCommand } from "./commands/profile.js";
+import { parseIntSafe } from "./utils/parse-int-safe.js";
 import type { ScanOptions, ModelCategory, OutputFormat, CheckOptions } from "../core/types.js";
 
 export function createProgram(): Command {
   const config = loadConfig();
   const defaultFormat = config.defaultFormat ?? "table";
   const defaultCategory = config.defaultCategory ?? "all";
-  const defaultTop = String(config.defaultTop ?? 5);
+  const defaultTopNum = config.defaultTop ?? 5;
+  const defaultTop = String(defaultTopNum);
+  const DEFAULT_ROUNDS = 3;
+  const DEFAULT_CONTEXT_SIZE = 2048;
+  const DEFAULT_COMPARE_TOP = 3;
 
   const program = new Command();
 
@@ -35,7 +40,7 @@ export function createProgram(): Command {
       const options: ScanOptions = {
         format: opts.format as OutputFormat,
         category: opts.category as ModelCategory | "all",
-        top: parseInt(opts.top, 10),
+        top: parseIntSafe(opts.top, defaultTopNum, "top"),
         verbose: opts.verbose,
         host: opts.host,
       };
@@ -55,7 +60,7 @@ export function createProgram(): Command {
       const options: ScanOptions = {
         format: opts.format as OutputFormat,
         category: opts.category as ModelCategory | "all",
-        top: parseInt(opts.top, 10),
+        top: parseIntSafe(opts.top, defaultTopNum, "top"),
         verbose: opts.verbose,
         host: opts.host,
       };
@@ -109,7 +114,7 @@ export function createProgram(): Command {
       await compareCommand(models, {
         format: opts.format as OutputFormat,
         category: opts.category as ModelCategory | "all",
-        top: parseInt(opts.top, 10),
+        top: parseIntSafe(opts.top, DEFAULT_COMPARE_TOP, "top"),
         quant: opts.quant,
         host: opts.host,
       });
@@ -154,7 +159,7 @@ export function createProgram(): Command {
     .action(async (opts) => {
       await benchmarkCommand({
         model: opts.model,
-        rounds: parseInt(opts.rounds, 10),
+        rounds: parseIntSafe(opts.rounds, DEFAULT_ROUNDS, "rounds"),
         format: opts.format as OutputFormat,
         host: opts.host,
       });
@@ -173,7 +178,7 @@ export function createProgram(): Command {
       await profileCommand({
         model: opts.model,
         prompt: opts.prompt,
-        contextSize: parseInt(opts.contextSize, 10),
+        contextSize: parseIntSafe(opts.contextSize, DEFAULT_CONTEXT_SIZE, "context-size"),
         format: opts.format as OutputFormat,
         host: opts.host,
       });

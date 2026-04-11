@@ -222,7 +222,12 @@ async function runProfiledInference(
       generationMs: Math.round(generationMs),
       totalMs: Math.round(totalMs),
       tokensGenerated,
-      tokensPerSec: tokensGenerated > 0 ? tokensGenerated / (generationMs / 1000) : 0,
+      // Guard against div-by-zero when generation finishes in a single chunk
+      // (generationMs === 0). Infinity would serialize unpredictably.
+      tokensPerSec:
+        tokensGenerated > 0 && generationMs > 0
+          ? tokensGenerated / (generationMs / 1000)
+          : 0,
       peakVramMb,
       avgGpuByPhase,
       snapshots,
@@ -253,7 +258,13 @@ async function takeSnapshot(phase: HardwareSnapshot["phase"]): Promise<HardwareS
     ]);
 
     if (cpu) snap.cpuPercent = Math.round(cpu.currentLoad);
-    if (mem) snap.ramUsedMb = Math.round(mem.used / (1024 * 1024));
+    if (mem) {
+      // Match detectMemory()/pollMemory() convention: exclude reclaimable
+      // buffcache from "used" so macOS doesn't always look like 98%.
+      const totalMb = Math.round(mem.total / (1024 * 1024));
+      const availableMb = Math.round(mem.available / (1024 * 1024));
+      snap.ramUsedMb = Math.max(0, totalMb - availableMb);
+    }
     if (gpu) {
       snap.gpuUtilPercent = gpu.percent;
       snap.gpuVramUsedMb = gpu.vramUsedMb;
@@ -281,12 +292,24 @@ async function pollGpuSnapshot(): Promise<{
       "--format=csv,noheader,nounits",
     ], { timeout: 3000 });
     const parts = stdout.trim().split(",").map((s) => s.trim());
+    // Explicit NaN check instead of `|| null` so legitimate 0 values (idle GPU,
+    // 0 W power on headless setups) are preserved rather than dropped.
+    const toNum = (s: string | undefined): number | null => {
+      if (s === undefined) return null;
+      const n = parseInt(s, 10);
+      return Number.isNaN(n) ? null : n;
+    };
+    const toFloat = (s: string | undefined): number | null => {
+      if (s === undefined) return null;
+      const n = parseFloat(s);
+      return Number.isNaN(n) ? null : n;
+    };
     return {
-      percent: parseInt(parts[0], 10) || null,
-      temp: parseInt(parts[1], 10) || null,
-      vramUsedMb: parseInt(parts[2], 10) || null,
-      vramTotalMb: parseInt(parts[3], 10) || null,
-      powerWatt: parseFloat(parts[4]) || null,
+      percent: toNum(parts[0]),
+      temp: toNum(parts[1]),
+      vramUsedMb: toNum(parts[2]),
+      vramTotalMb: toNum(parts[3]),
+      powerWatt: toFloat(parts[4]),
     };
   } catch {
     return null;

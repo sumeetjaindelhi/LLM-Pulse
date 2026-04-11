@@ -80,13 +80,21 @@ export async function benchmarkCommand(options: BenchmarkOptions): Promise<void>
   }
 
   spinner?.succeed(`Benchmarking ${theme.highlight(model)}`);
+  // The prompt library has a finite size. If the user asks for more rounds
+  // than we have prompts, honestly tell them instead of silently running fewer.
+  const effectiveRounds = Math.min(options.rounds, TEST_PROMPTS.length);
   if (!silent) {
     console.log(sectionHeader(`Inference Benchmark — ${model}`));
-    console.log(`\n  Running ${options.rounds} rounds...\n`);
+    if (options.rounds > TEST_PROMPTS.length) {
+      console.log(
+        `\n  ${theme.muted(`Note: --rounds capped at ${TEST_PROMPTS.length} (benchmark prompt library size).`)}`,
+      );
+    }
+    console.log(`\n  Running ${effectiveRounds} rounds...\n`);
   }
 
   const results: RoundResult[] = [];
-  const prompts = TEST_PROMPTS.slice(0, options.rounds);
+  const prompts = TEST_PROMPTS.slice(0, effectiveRounds);
 
   for (let i = 0; i < prompts.length; i++) {
     const roundSpinner = silent ? null : ora({

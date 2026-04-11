@@ -89,14 +89,18 @@ export function runDiagnostics(
       fix: process.platform === "linux" ? {
         label: "Install ROCm",
         command: "sudo apt install rocm-smi-lib",
+        argv: ["sudo", "apt", "install", "-y", "rocm-smi-lib"],
         description: "Installs ROCm SMI for AMD GPU monitoring (Ubuntu/Debian)",
       } : undefined,
     });
   }
 
-  if (gpu && gpu.driverVersion) {
+  // Driver version check is NVIDIA-specific — we have no age criteria for
+  // AMD/Intel/Apple drivers, so it's dishonest to claim they're "up to date".
+  // Only emit a driver check for NVIDIA.
+  if (gpu && gpu.driverVersion && gpu.vendor === "NVIDIA") {
     const driverMajor = parseInt(gpu.driverVersion.split(".")[0], 10) || 0;
-    if (gpu.vendor === "NVIDIA" && driverMajor < 550) {
+    if (driverMajor < 550) {
       checks.push({
         label: "GPU Driver",
         severity: "warning",
@@ -143,7 +147,7 @@ export function runDiagnostics(
   } else if (hardware.disk.type === "SSD") {
     checks.push({ label: "Disk", severity: "pass", message: "SSD — decent model loading speed" });
     score += DOCTOR_WEIGHTS.diskType * 0.8;
-  } else {
+  } else if (hardware.disk.type === "HDD") {
     checks.push({
       label: "Disk",
       severity: "warning",
@@ -151,6 +155,16 @@ export function runDiagnostics(
       suggestion: "An SSD significantly improves model load times.",
     });
     score += DOCTOR_WEIGHTS.diskType * 0.3;
+  } else {
+    // "Unknown" — detection couldn't classify the drive. Don't nag the user
+    // about a problem we can't confirm; emit a neutral info message and award
+    // half the diskType weight.
+    checks.push({
+      label: "Disk",
+      severity: "info",
+      message: "Disk type could not be detected",
+    });
+    score += DOCTOR_WEIGHTS.diskType * 0.5;
   }
 
   if (hardware.disk.freeGb >= MIN_REQUIREMENTS.diskFreeGb) {
@@ -183,6 +197,7 @@ export function runDiagnostics(
           fix: {
             label: "Pull a starter model",
             command: "ollama pull llama3.2:3b",
+            argv: ["ollama", "pull", "llama3.2:3b"],
             description: "Downloads Llama 3.2 3B (~2 GB) — a great starter model",
           },
         });
@@ -197,17 +212,29 @@ export function runDiagnostics(
         fix: installed?.name === "Ollama" ? {
           label: "Start Ollama",
           command: "ollama serve",
+          argv: ["ollama", "serve"],
           description: "Starts the Ollama server in the background",
         } : undefined,
       });
     }
     score += DOCTOR_WEIGHTS.runtimeInstalled;
   } else {
-    const installCmd = process.platform === "win32"
-      ? "winget install Ollama.Ollama"
-      : process.platform === "darwin"
-      ? "brew install ollama"
-      : "curl -fsSL https://ollama.com/install.sh | sh";
+    // Platform-specific install fixes. For Linux we need a shell pipe, which
+    // doesn't survive naive argv splitting — invoke `sh -c` explicitly so the
+    // curl output streams into sh. The command string is a compile-time
+    // constant, so there is no interpolation / injection risk.
+    let installCmd: string;
+    let installArgv: string[];
+    if (process.platform === "win32") {
+      installCmd = "winget install Ollama.Ollama";
+      installArgv = ["winget", "install", "Ollama.Ollama"];
+    } else if (process.platform === "darwin") {
+      installCmd = "brew install ollama";
+      installArgv = ["brew", "install", "ollama"];
+    } else {
+      installCmd = "curl -fsSL https://ollama.com/install.sh | sh";
+      installArgv = ["sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh"];
+    }
     checks.push({
       label: "Runtime",
       severity: "fail",
@@ -216,6 +243,7 @@ export function runDiagnostics(
       fix: {
         label: "Install Ollama",
         command: installCmd,
+        argv: installArgv,
         description: "Installs Ollama — the easiest way to run LLMs locally",
       },
     });

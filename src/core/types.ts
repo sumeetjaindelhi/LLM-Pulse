@@ -5,8 +5,12 @@ export interface CpuInfo {
   manufacturer: string;
   cores: number;
   threads: number;
-  speed: number; // GHz base
-  speedMax: number; // GHz boost
+  // GHz base. null on Apple Silicon: systeminformation's macOS code path reads
+  // hw.tbfrequency (the 24 MHz timer base) and multiplies by 100, producing a
+  // bogus "2.4 GHz" for every M-series chip. There's no public API to read the
+  // real P-core max, so we report null rather than a wrong number.
+  speed: number | null;
+  speedMax: number | null; // GHz boost; same null rule as `speed`
   architecture: string; // x64, arm64
   flags: string[]; // AVX, AVX2, AVX-512, etc.
   hasAvx2: boolean;
@@ -128,7 +132,9 @@ export type CheckSeverity = "pass" | "warning" | "fail" | "info";
 
 export interface FixAction {
   label: string; // e.g. "Start Ollama"
-  command: string; // e.g. "ollama serve"
+  command: string; // display-only, shown to the user (e.g. "curl -fsSL ... | sh")
+  argv: string[]; // actual argv passed to execa; argv[0] is the binary
+  useShell?: boolean; // true when the command needs shell features (pipes/redirects)
   description: string; // what the fix does
 }
 

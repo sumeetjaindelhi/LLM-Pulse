@@ -13,8 +13,13 @@ interface AlertBarProps {
 function computeAlerts(snapshot: MonitorSnapshot, session: SessionStats, tokHistory: number[]): SmartAlert[] {
   const alerts: SmartAlert[] = [];
 
-  // VRAM nearly full
-  if (snapshot.gpuVramUsedMb !== null && snapshot.gpuVramTotalMb !== null) {
+  // VRAM nearly full. Guard on `> 0` for the denominator — without it, a GPU
+  // that reports 0 total VRAM would surface "VRAM at Infinity%" alerts.
+  if (
+    snapshot.gpuVramUsedMb !== null &&
+    snapshot.gpuVramTotalMb !== null &&
+    snapshot.gpuVramTotalMb > 0
+  ) {
     const vramPercent = (snapshot.gpuVramUsedMb / snapshot.gpuVramTotalMb) * 100;
     if (vramPercent >= ALERT_THRESHOLDS.vramHighPercent) {
       alerts.push({

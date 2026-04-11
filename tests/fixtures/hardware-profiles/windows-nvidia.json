@@ -1,0 +1,50 @@
+{
+  "cpu": {
+    "brand": "AMD Ryzen 9 7950X",
+    "manufacturer": "AMD",
+    "cores": 16,
+    "threads": 32,
+    "speed": 4.5,
+    "speedMax": 5.7,
+    "architecture": "x64",
+    "flags": ["avx", "avx2", "avx512"],
+    "hasAvx2": true
+  },
+  "gpus": [
+    {
+      "vendor": "NVIDIA",
+      "model": "NVIDIA GeForce RTX 4090",
+      "vramMb": 24576,
+      "driverVersion": "560.94",
+      "acceleratorVersion": "12.6",
+      "acceleratorType": "cuda",
+      "utilizationPercent": 0,
+      "temperatureCelsius": 42,
+      "vramUsedMb": 1024
+    }
+  ],
+  "memory": {
+    "totalMb": 65536,
+    "availableMb": 50000,
+    "usedMb": 15536,
+    "usedPercent": 24,
+    "type": "DDR5",
+    "speedMhz": 6000
+  },
+  "disk": {
+    "type": "NVMe",
+    "freeGb": 1800,
+    "totalGb": 2000
+  },
+  "primaryGpu": {
+    "vendor": "NVIDIA",
+    "model": "NVIDIA GeForce RTX 4090",
+    "vramMb": 24576,
+    "driverVersion": "560.94",
+    "acceleratorVersion": "12.6",
+    "acceleratorType": "cuda",
+    "utilizationPercent": 0,
+    "temperatureCelsius": 42,
+    "vramUsedMb": 1024
+  }
+}

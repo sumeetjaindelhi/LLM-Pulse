@@ -1,9 +1,32 @@
 import { existsSync } from "node:fs";
-import { LMSTUDIO_PATHS, LMSTUDIO_API_URL } from "../core/constants.js";
+import { homedir } from "node:os";
+import { LMSTUDIO_PATH_HINTS } from "../core/constants.js";
+import { resolveLmStudioHost } from "../core/config.js";
 import { LmStudioModelsSchema } from "../core/api-schemas.js";
 import type { RuntimeInfo } from "../core/types.js";
 
-export async function detectLmStudio(): Promise<RuntimeInfo> {
+/**
+ * Resolve a LM Studio path hint into an absolute filesystem path, or null if
+ * the required environment variable is missing. Refuses to produce root-level
+ * paths like `/LM Studio` when `LOCALAPPDATA` is unset — returns null so the
+ * caller skips this hint instead of trying a bogus path.
+ */
+function resolveHint(hint: string): string | null {
+  // Absolute POSIX paths and Windows drive paths pass through as-is.
+  if (hint.startsWith("/") || /^[A-Za-z]:[\\/]/.test(hint)) return hint;
+  // Otherwise: `ENVVAR/subpath` — read the env var (or homedir for HOME).
+  const slashIdx = hint.indexOf("/");
+  const envVar = slashIdx === -1 ? hint : hint.slice(0, slashIdx);
+  const rest = slashIdx === -1 ? "" : hint.slice(slashIdx);
+  let base: string | undefined;
+  if (envVar === "HOME") base = homedir();
+  else base = process.env[envVar];
+  if (!base) return null;
+  return `${base}${rest}`;
+}
+
+export async function detectLmStudio(host?: string): Promise<RuntimeInfo> {
+  const baseUrl = resolveLmStudioHost(host);
   const info: RuntimeInfo = {
     name: "LM Studio",
     status: "not_found",
@@ -13,12 +36,13 @@ export async function detectLmStudio(): Promise<RuntimeInfo> {
   };
 
   const platform = process.platform as "win32" | "darwin" | "linux";
-  const paths = LMSTUDIO_PATHS[platform] ?? [];
+  const hints = LMSTUDIO_PATH_HINTS[platform] ?? [];
 
-  for (const p of paths) {
-    if (p && existsSync(p)) {
+  for (const hint of hints) {
+    const resolved = resolveHint(hint);
+    if (resolved && existsSync(resolved)) {
       info.status = "installed";
-      info.path = p;
+      info.path = resolved;
       break;
     }
   }
@@ -26,7 +50,7 @@ export async function detectLmStudio(): Promise<RuntimeInfo> {
   // Check if LM Studio's local server is running
   if (info.status === "installed") {
     try {
-      const response = await fetch(`${LMSTUDIO_API_URL}/v1/models`, {
+      const response = await fetch(`${baseUrl}/v1/models`, {
         signal: AbortSignal.timeout(3000),
       });
       if (response.ok) {

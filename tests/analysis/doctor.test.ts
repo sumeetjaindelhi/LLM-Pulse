@@ -5,6 +5,7 @@ import highEnd from "../fixtures/hardware-profiles/high-end-nvidia.json";
 import cpuOnly from "../fixtures/hardware-profiles/cpu-only.json";
 import appleM2 from "../fixtures/hardware-profiles/apple-m2.json";
 import amdRdna3 from "../fixtures/hardware-profiles/amd-rdna3.json";
+import windowsNvidia from "../fixtures/hardware-profiles/windows-nvidia.json";
 
 const noRuntimes: RuntimeInfo[] = [
   { name: "Ollama", status: "not_found", version: null, path: null, models: [] },
@@ -91,6 +92,23 @@ describe("runDiagnostics", () => {
     const simdCheck = report.checks.find((c) => c.label === "SIMD");
     expect(simdCheck).toBeDefined();
     expect(simdCheck!.severity).toBe("pass");
+  });
+
+  it("windows-nvidia with driver 560 passes the driver-version check", () => {
+    const report = runDiagnostics(windowsNvidia as HardwareProfile, withOllama);
+    const driverCheck = report.checks.find((c) => c.label === "GPU Driver");
+    expect(driverCheck).toBeDefined();
+    expect(driverCheck!.severity).toBe("pass");
+    expect(driverCheck!.message).toContain("up to date");
+  });
+
+  it("windows-nvidia without any runtime still scores well due to GPU+RAM", () => {
+    const report = runDiagnostics(windowsNvidia as HardwareProfile, noRuntimes);
+    // 24GB VRAM + 64GB DDR5 + NVMe + AVX2 — hardware is great,
+    // runtime missing is the only gap. Should still clear 65/100.
+    expect(report.score).toBeGreaterThanOrEqual(65);
+    const rtCheck = report.checks.find((c) => c.label === "Runtime");
+    expect(rtCheck?.severity).toBe("fail");
   });
 
   it("score is always 0-100", () => {

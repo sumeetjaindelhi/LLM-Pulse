@@ -2,7 +2,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { detectHardware } from "../hardware/index.js";
-import { clearHardwareCache } from "../hardware/index.js";
 import { HardwareMonitor } from "../hardware/monitor.js";
 import { detectAllRuntimes } from "../runtimes/index.js";
 import { getAllModels, searchModels, filterByCategory, resolveModel } from "../models/database.js";
@@ -12,6 +11,7 @@ import { scoreModel, deriveVerdict, getAvailableVram } from "../analysis/scorer.
 import { runDiagnostics } from "../analysis/doctor.js";
 import { resolveOllamaHost } from "../core/config.js";
 import { VERSION } from "../core/constants.js";
+import { LocalhostUrl } from "../core/api-schemas.js";
 import type { ModelCategory } from "../core/types.js";
 
 const CategoryEnum = z.enum(["general", "coding", "reasoning", "creative", "multilingual", "all"]);
@@ -28,11 +28,13 @@ server.tool(
   {
     category: CategoryEnum.optional().default("all").describe("Filter recommendations by model category"),
     top: z.number().int().min(1).max(50).optional().default(5).describe("Number of recommendations to return"),
-    host: z.string().optional().describe("Ollama API host URL (default: http://127.0.0.1:11434)"),
+    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only; default: http://127.0.0.1:11434)"),
   },
   async ({ category, top, host }) => {
     try {
-      clearHardwareCache();
+      // Keep clearOllamaCache (models change when user pulls/deletes, fetch is
+      // cheap). Don't clear the hardware cache — detectHardware has a 60s TTL
+      // that handles both chained-tool freshness and long-session drift.
       clearOllamaCache();
       const ollamaHost = resolveOllamaHost(host);
 
@@ -78,12 +80,10 @@ server.tool(
   {
     model: z.string().describe("Model name, ID, or Ollama tag (e.g. 'llama3.1:8b', 'deepseek-coder-v2')"),
     quant: z.string().optional().describe("Specific quantization to check (e.g. 'Q4_K_M', 'Q8_0')"),
-    host: z.string().optional().describe("Ollama API host URL"),
+    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only)"),
   },
   async ({ model: modelArg, quant, host }) => {
     try {
-      clearHardwareCache();
-
       const hardware = await detectHardware();
       const model = resolveModel(modelArg);
 
@@ -102,17 +102,46 @@ server.tool(
         };
       }
 
-      // Filter quantizations if specific quant requested
+      // Filter quantizations if specific quant requested. Return a useful
+      // error on mismatch instead of silently falling through to all quants —
+      // users who typo'd a quant name deserve to know.
       let quants = model.quantizations;
       if (quant) {
         const match = quants.find((q) => q.name.toLowerCase() === quant.toLowerCase());
-        if (match) quants = [match];
+        if (!match) {
+          return {
+            isError: true,
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                error: `Quantization "${quant}" not found for model ${model.name}`,
+                availableQuantizations: quants.map((q) => q.name),
+              }, null, 2),
+            }],
+          };
+        }
+        quants = [match];
       }
 
       // Score all quantizations
       const scores = quants
         .map((q) => scoreModel(model, q, hardware))
         .sort((a, b) => b.compositeScore - a.compositeScore);
+
+      // Defense-in-depth: if the model has zero quantizations in the DB
+      // (should never happen with the current data/models.json, but the
+      // schema doesn't enforce `.min(1)`), fail gracefully.
+      if (scores.length === 0) {
+        return {
+          isError: true,
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              error: `Model ${model.name} has no quantizations defined in the database`,
+            }, null, 2),
+          }],
+        };
+      }
 
       const bestScore = scores[0];
       const verdict = deriveVerdict(bestScore.fitLevel);
@@ -173,12 +202,10 @@ server.tool(
     category: CategoryEnum.optional().default("all").describe("Filter by model category"),
     top: z.number().int().min(1).max(50).optional().default(5).describe("Number of recommendations"),
     onlyFitting: z.boolean().optional().default(true).describe("Exclude models that cannot run on this hardware"),
-    host: z.string().optional().describe("Ollama API host URL"),
+    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only)"),
   },
   async ({ category, top, onlyFitting }) => {
     try {
-      clearHardwareCache();
-
       const hardware = await detectHardware();
       const recommendations = getRecommendations(hardware, { category, top, onlyFitting });
 
@@ -224,11 +251,10 @@ server.tool(
   "doctor",
   "System health check — scores your hardware for local LLM readiness (0-100), checks CPU/GPU/RAM/disk/runtimes, provides actionable suggestions",
   {
-    host: z.string().optional().describe("Ollama API host URL"),
+    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only)"),
   },
   async ({ host }) => {
     try {
-      clearHardwareCache();
       clearOllamaCache();
       const ollamaHost = resolveOllamaHost(host);
 
@@ -257,7 +283,7 @@ server.tool(
     search: z.string().optional().describe("Search query — matches model name, ID, or provider"),
     category: CategoryEnum.optional().default("all").describe("Filter by model category"),
     fits: z.boolean().optional().default(false).describe("Only show models that fit your hardware (triggers hardware scan)"),
-    host: z.string().optional().describe("Ollama API host URL"),
+    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only)"),
   },
   async ({ search, category, fits }) => {
     try {
@@ -273,11 +299,22 @@ server.tool(
 
       // If --fits, scan hardware and score/filter
       if (fits) {
-        clearHardwareCache();
         const hardware = await detectHardware();
 
-        const scored = models
-          .map((model) => {
+        type ScoredModel = {
+          id: string;
+          name: string;
+          provider: string;
+          parametersBillion: number;
+          categories: string[];
+          quantization: string;
+          vramMb: number;
+          ollamaTag: string | null;
+          fitLevel: string;
+          compositeScore: number;
+        };
+        const scored: ScoredModel[] = models
+          .map((model): ScoredModel | null => {
             const scores = model.quantizations
               .map((q) => scoreModel(model, q, hardware))
               .filter((s) => s.fitLevel !== "cannot_run")
@@ -291,7 +328,7 @@ server.tool(
               name: model.name,
               provider: model.provider,
               parametersBillion: model.parametersBillion,
-              categories: model.categories,
+              categories: [...model.categories],
               quantization: best.quantization.name,
               vramMb: best.quantization.vramMb,
               ollamaTag: model.ollamaTag,
@@ -299,7 +336,9 @@ server.tool(
               compositeScore: best.compositeScore,
             };
           })
-          .filter(Boolean);
+          // Explicit type predicate — `.filter(Boolean)` relies on TS 5.5+
+          // narrowing; being explicit is version-independent and clearer.
+          .filter((x): x is ScoredModel => x !== null);
 
         return {
           content: [{
@@ -309,20 +348,23 @@ server.tool(
         };
       }
 
-      // No hardware filter — show all with smallest quant info
-      const result = models.map((m) => {
-        const smallest = m.quantizations[0];
-        return {
-          id: m.id,
-          name: m.name,
-          provider: m.provider,
-          parametersBillion: m.parametersBillion,
-          categories: m.categories,
-          quantization: smallest.name,
-          vramMb: smallest.vramMb,
-          ollamaTag: m.ollamaTag,
-        };
-      });
+      // No hardware filter — show all with smallest quant info. Guard against
+      // models with no quantizations (defense-in-depth; not expected in practice).
+      const result = models
+        .filter((m) => m.quantizations.length > 0)
+        .map((m) => {
+          const smallest = m.quantizations[0];
+          return {
+            id: m.id,
+            name: m.name,
+            provider: m.provider,
+            parametersBillion: m.parametersBillion,
+            categories: m.categories,
+            quantization: smallest.name,
+            vramMb: smallest.vramMb,
+            ollamaTag: m.ollamaTag,
+          };
+        });
 
       return {
         content: [{
@@ -344,7 +386,7 @@ server.tool(
   "monitor",
   "Take a one-shot snapshot of live hardware state — CPU/GPU utilization, VRAM usage, temperature, power, and active Ollama model with tokens/sec",
   {
-    host: z.string().optional().describe("Ollama API host URL (default: http://127.0.0.1:11434)"),
+    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only; default: http://127.0.0.1:11434)"),
   },
   async ({ host }) => {
     try {
