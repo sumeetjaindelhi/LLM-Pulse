@@ -1,4 +1,4 @@
-import { FIT_THRESHOLDS } from "../core/constants.js";
+import { FIT_THRESHOLDS, UNIFIED_MEMORY_HEADROOM_MB } from "../core/constants.js";
 import type {
   HardwareProfile,
   ModelEntry,
@@ -30,7 +30,17 @@ export function getAvailableVram(hardware: HardwareProfile): number {
   // Guard on vramMb > 0: a GPU with zero reported VRAM (e.g. an Intel iGPU
   // systeminformation couldn't probe) should fall back to the CPU/RAM path
   // rather than forcing every model into cannot_run.
+  //
+  // On unified memory (Apple Silicon), the wired-limit sysctl is a kernel
+  // ceiling — it doesn't reflect that the OS, editor, browser, and every
+  // other app are drawing from the same pool. We subtract a flat headroom
+  // so fit scoring reports what the machine can run while staying usable,
+  // not the theoretical max for an idle box. A 2 GB floor prevents the
+  // headroom from flipping small-RAM systems into cannot_run for every model.
   if (hardware.primaryGpu && hardware.primaryGpu.vramMb > 0) {
+    if (hardware.primaryGpu.acceleratorType === "metal") {
+      return Math.max(hardware.primaryGpu.vramMb - UNIFIED_MEMORY_HEADROOM_MB, 2048);
+    }
     return hardware.primaryGpu.vramMb;
   }
   return hardware.memory.availableMb;
@@ -83,13 +93,10 @@ export function scoreModel(
   hardware: HardwareProfile,
   category: ModelCategory | "all" = "all",
 ): ModelScore {
-  // Use GPU VRAM if available, otherwise use RAM (CPU inference).
-  // `primaryGpu.vramMb` is the already-resolved usable cap — Apple Silicon's
-  // wired-memory limit is applied in `detectHardware`, so no multiplier here.
-  const availableVramMb =
-    hardware.primaryGpu && hardware.primaryGpu.vramMb > 0
-      ? hardware.primaryGpu.vramMb
-      : hardware.memory.availableMb;
+  // Single source of truth for "what VRAM can this model actually use" —
+  // applies the unified-memory headroom on Apple Silicon so fit ratings
+  // match day-to-day usability, not the idle sysctl ceiling.
+  const availableVramMb = getAvailableVram(hardware);
 
   const fitRatio = getFitRatio(availableVramMb, quant.vramMb);
   const fitLevel = classifyFit(availableVramMb, quant.vramMb);

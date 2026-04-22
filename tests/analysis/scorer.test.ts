@@ -84,26 +84,52 @@ describe("scoreModel", () => {
     expect(score.speedEstimate).toBe("fast");
   });
 
-  it("treats Apple Silicon vramMb as the resolved wired-memory cap", () => {
-    // As of v0.9.0, `primaryGpu.vramMb` is the already-resolved usable VRAM
-    // (sysctl iogpu.wired_limit_mb, or 67% of RAM as fallback). No factor is
-    // applied by the scorer — it trusts the detector. Fixture sets 10977 MB
-    // (67% of a 16 GB M2 Pro, matching macOS's default wired limit).
+  it("applies unified-memory headroom on Apple Silicon", () => {
+    // As of v0.9.1, the scorer subtracts UNIFIED_MEMORY_HEADROOM_MB (6144)
+    // from the wired-limit cap on Metal GPUs, because that cap is a kernel
+    // ceiling and doesn't reserve anything for the OS/editor/Node sharing
+    // the same RAM pool. Fixture wiredCap = 10977 MB (16 GB M2 Pro) →
+    // practical VRAM = 10977 - 6144 = 4833 MB.
     const q4 = dummyModel.quantizations[0]; // 4500 MB needed
     const score = scoreModel(dummyModel, q4, appleM2 as HardwareProfile);
 
-    // 10977 / 4500 = 2.44 → excellent (>= 1.5x headroom)
-    expect(score.fitLevel).toBe("excellent");
+    // 4833 / 4500 = 1.07 → tight (previously excellent at 2.44x, which was
+    // unrealistic for a machine actively being used for dev work).
+    expect(score.fitLevel).toBe("tight");
 
-    // A quantization that barely fits after cap
+    // A quantization that exceeded the raw cap already fails hard under
+    // the practical cap: 4833 / 13000 = 0.37 → cannot_run.
     const bigQuant: QuantizationVariant = {
       name: "Q8_0",
       bitsPerWeight: 8.5,
-      vramMb: 13000, // 10977 / 13000 = 0.844 → barely (>= 0.75, < 1.0)
+      vramMb: 13000,
       qualityRetention: 0.99,
     };
     const bigScore = scoreModel(dummyModel, bigQuant, appleM2 as HardwareProfile);
-    expect(bigScore.fitLevel).toBe("barely");
+    expect(bigScore.fitLevel).toBe("cannot_run");
+  });
+
+  it("leaves a 2 GB floor when headroom would exceed total VRAM", () => {
+    // On a small Apple system (e.g. 8 GB M1 with wiredCap ≈ 5 GB), the
+    // 6 GB headroom would go negative. The floor should keep it at 2 GB so
+    // tiny models still register as runnable rather than universal
+    // cannot_run.
+    const tinyApple: HardwareProfile = {
+      ...(appleM2 as HardwareProfile),
+      primaryGpu: {
+        ...(appleM2 as HardwareProfile).primaryGpu!,
+        vramMb: 5000, // below the 6144 headroom
+      },
+    };
+    const tinyQuant: QuantizationVariant = {
+      name: "Q4_K_M",
+      bitsPerWeight: 4.83,
+      vramMb: 1500, // a 2B-class model
+      qualityRetention: 0.9,
+    };
+    const score = scoreModel(dummyModel, tinyQuant, tinyApple);
+    // floor is 2048 MB → 2048 / 1500 = 1.37 → comfortable
+    expect(score.fitLevel).toBe("comfortable");
   });
 
 describe("getRecommendations", () => {
