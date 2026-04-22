@@ -2,7 +2,7 @@ import React from "react";
 import { Text, Box } from "ink";
 import type { MonitorSnapshot } from "../hardware/monitor.js";
 import type { SmartAlert, SessionStats } from "../core/types.js";
-import { ALERT_THRESHOLDS, EXPECTED_TOK_PER_SEC } from "../core/constants.js";
+import { ALERT_THRESHOLDS, EXPECTED_TOK_PER_SEC, pickGpuTempThreshold } from "../core/constants.js";
 
 interface AlertBarProps {
   snapshot: MonitorSnapshot;
@@ -30,13 +30,23 @@ function computeAlerts(snapshot: MonitorSnapshot, session: SessionStats, tokHist
     }
   }
 
-  // GPU high temperature
-  if (snapshot.gpuTemp !== null && snapshot.gpuTemp >= ALERT_THRESHOLDS.gpuTempHighCelsius) {
-    alerts.push({
-      severity: "warning",
-      icon: "\u26A0",
-      message: `GPU temperature at ${Math.round(snapshot.gpuTemp)}\u00B0C \u2014 possible thermal throttling`,
-    });
+  // GPU high temperature. Threshold varies by vendor — Apple Silicon throttles
+  // around 72°C (fanless + power-efficient), NVIDIA/AMD desktops tolerate 85°C,
+  // mobile dGPUs around 78°C. "Mobile", "Laptop", "Max-Q", and "Max-P" in the
+  // model name are strong signals of a laptop SKU.
+  if (snapshot.gpuTemp !== null) {
+    const modelLower = (snapshot.gpuModel ?? "").toLowerCase();
+    const isMobile = /mobile|laptop|max-[qp]/.test(modelLower);
+    const threshold = snapshot.gpuVendor
+      ? pickGpuTempThreshold(snapshot.gpuVendor, isMobile)
+      : ALERT_THRESHOLDS.gpuTempHighCelsius;
+    if (snapshot.gpuTemp >= threshold) {
+      alerts.push({
+        severity: "warning",
+        icon: "\u26A0",
+        message: `GPU temperature at ${Math.round(snapshot.gpuTemp)}\u00B0C (threshold ${threshold}\u00B0C) \u2014 possible thermal throttling`,
+      });
+    }
   }
 
   // Speed drop detection (compare recent avg to earlier avg)

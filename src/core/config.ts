@@ -64,11 +64,44 @@ export function getConfig(): LlmPulseConfig {
   return cachedConfig;
 }
 
-/** Resolve Ollama host URL. Priority: CLI flag > config > default constant. */
+/** Strip trailing slashes so we never produce double-slashes when concatenating paths. */
+function trimHost(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+/** Normalize a host candidate into a full URL string or return null if it
+ *  doesn't look like one. Accepts both Ollama's env-var format (bare
+ *  `host:port`, `0.0.0.0`) and full URLs (`http://host:port`). The bare-host
+ *  form is promoted to `http://` since Ollama's API is HTTP by default.
+ */
+function normalizeHostCandidate(value: string | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > 2048) return null;
+
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  try {
+    const u = new URL(withScheme);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (!u.hostname) return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve Ollama host URL.
+ *  Priority: CLI flag > config file > `OLLAMA_HOST` env var > default constant.
+ *  The env var is the one Ollama itself uses, so we honor it rather than
+ *  silently defaulting to 127.0.0.1 when the user has pointed their daemon
+ *  somewhere else.
+ */
 export function resolveOllamaHost(cliHost?: string): string {
-  if (cliHost) return cliHost.replace(/\/+$/, "");
+  if (cliHost) return trimHost(cliHost);
   const config = getConfig();
-  if (config.ollamaHost) return config.ollamaHost.replace(/\/+$/, "");
+  if (config.ollamaHost) return trimHost(config.ollamaHost);
+  const envNormalized = normalizeHostCandidate(process.env.OLLAMA_HOST);
+  if (envNormalized) return trimHost(envNormalized);
   return OLLAMA_API_URL;
 }
 

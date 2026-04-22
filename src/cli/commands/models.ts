@@ -17,6 +17,8 @@ interface ModelsOptions {
   fits: boolean;
   live: boolean;
   installed: boolean;
+  library?: boolean;
+  refresh?: boolean;
   format: string;
   host?: string;
 }
@@ -159,18 +161,40 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
 }
 
 async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Promise<void> {
-  const spinner = ora({ text: "Fetching models from Ollama...", color: "cyan" }).start();
+  const includeLibrary = options.library ?? false;
+  const refresh = options.refresh ?? false;
+  const fetchLabel = includeLibrary
+    ? refresh
+      ? "Refreshing Ollama library catalog..."
+      : "Fetching Ollama library catalog..."
+    : "Fetching models from Ollama...";
+
+  const spinner = ora({ text: fetchLabel, color: "cyan" }).start();
+
+  const mergeOpts = { ollamaHost, includeLibrary, refresh };
 
   let merged: MergedModel[];
   let hardware: HardwareProfile | null = null;
 
-  if (options.fits) {
-    [merged, hardware] = await Promise.all([getMergedModels(ollamaHost), detectHardware()]);
-  } else {
-    merged = await getMergedModels(ollamaHost);
+  try {
+    if (options.fits) {
+      [merged, hardware] = await Promise.all([getMergedModels(mergeOpts), detectHardware()]);
+    } else {
+      merged = await getMergedModels(mergeOpts);
+    }
+  } catch (err) {
+    spinner.fail("Model fetch failed");
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`\n  ${theme.fail("Error:")} ${msg}\n`);
+    process.exitCode = 1;
+    return;
   }
 
-  spinner.succeed("Models fetched");
+  spinner.succeed(
+    includeLibrary
+      ? `Catalog loaded (${merged.length} models)`
+      : "Models fetched",
+  );
 
   // Apply filters
   if (options.installed) {
@@ -179,9 +203,16 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
   if (options.search) {
     const q = options.search.toLowerCase();
     merged = merged.filter((m) => {
-      const name = m.entry?.name ?? m.ollamaModel?.name ?? "";
+      const name = m.entry?.name ?? m.libraryModel?.slug ?? m.ollamaModel?.name ?? "";
       const provider = m.entry?.provider ?? "";
-      return name.toLowerCase().includes(q) || provider.toLowerCase().includes(q);
+      const description = m.libraryModel?.description ?? "";
+      const capabilities = m.libraryModel?.capabilities.join(" ") ?? "";
+      return (
+        name.toLowerCase().includes(q) ||
+        provider.toLowerCase().includes(q) ||
+        description.toLowerCase().includes(q) ||
+        capabilities.toLowerCase().includes(q)
+      );
     });
   }
   if (options.category !== "all") {
@@ -190,12 +221,17 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
 
   if (options.format === "json") {
     const output = merged.map((m) => ({
-      name: m.entry?.name ?? m.ollamaModel?.name ?? "",
+      name: m.entry?.name ?? m.libraryModel?.slug ?? m.ollamaModel?.name ?? "",
+      slug: m.libraryModel?.slug ?? null,
       ollamaTag: m.ollamaTag,
       installed: m.installed,
+      sources: m.sources,
       provider: m.entry?.provider ?? null,
       parametersBillion: m.entry?.parametersBillion ?? null,
       parameterSize: m.ollamaModel?.parameterSize ?? null,
+      parameterSizes: m.libraryModel?.parameterSizes ?? null,
+      capabilities: m.libraryModel?.capabilities ?? null,
+      description: m.libraryModel?.description ?? null,
       quantization: m.ollamaModel?.quantization ?? null,
       family: m.ollamaModel?.family ?? null,
       sizeBytes: m.ollamaModel?.size ?? null,
@@ -205,13 +241,20 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
   }
 
   if (options.format === "csv") {
-    const headers = ["name", "ollamaTag", "installed", "provider", "parametersBillion", "quantization", "family", "sizeBytes"];
+    const headers = [
+      "name", "slug", "ollamaTag", "installed", "sources", "provider",
+      "parametersBillion", "parameterSizes", "capabilities", "quantization", "family", "sizeBytes",
+    ];
     const rows = merged.map((m) => [
-      m.entry?.name ?? m.ollamaModel?.name ?? "",
+      m.entry?.name ?? m.libraryModel?.slug ?? m.ollamaModel?.name ?? "",
+      m.libraryModel?.slug ?? null,
       m.ollamaTag,
       m.installed,
+      m.sources.join(";"),
       m.entry?.provider ?? null,
       m.entry?.parametersBillion ?? null,
+      m.libraryModel?.parameterSizes.join(";") ?? null,
+      m.libraryModel?.capabilities.join(";") ?? null,
       m.ollamaModel?.quantization ?? null,
       m.ollamaModel?.family ?? null,
       m.ollamaModel?.size ?? null,
@@ -220,7 +263,11 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
     return;
   }
 
-  const label = options.installed ? "Installed Models" : "All Models (Live)";
+  const label = options.installed
+    ? "Installed Models"
+    : includeLibrary
+      ? "All Models (Library + Local)"
+      : "All Models (Live)";
   console.log(sectionHeader(`${label} (${merged.length} results)`));
   console.log();
 
@@ -238,7 +285,7 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
       theme.muted("Quant"),
       theme.muted("Size"),
       theme.muted("Fit"),
-      theme.muted("Installed"),
+      theme.muted("Source"),
     ],
     style: { head: [], border: ["gray"], compact: true },
     chars: {
@@ -252,11 +299,12 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
   });
 
   for (const m of merged) {
-    const name = m.entry?.name ?? m.ollamaModel?.name ?? "—";
-    const provider = m.entry?.provider ?? m.ollamaModel?.family ?? "—";
+    const name = m.entry?.name ?? m.libraryModel?.slug ?? m.ollamaModel?.name ?? "—";
+    const provider = m.entry?.provider ?? m.ollamaModel?.family ?? (m.libraryModel ? "ollama.com" : "—");
     const params = m.entry
       ? `${m.entry.parametersBillion}B`
-      : m.ollamaModel?.parameterSize ?? "—";
+      : m.ollamaModel?.parameterSize
+        ?? (m.libraryModel?.parameterSizes.length ? m.libraryModel.parameterSizes.join("/") : "—");
     const quant = m.ollamaModel?.quantization
       ?? m.entry?.quantizations[0]?.name
       ?? "—";
@@ -280,7 +328,7 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
       fitLabel = theme.muted("—");
     }
 
-    const installedIcon = m.installed ? theme.pass("✓") : theme.muted("—");
+    const sourceLabel = formatSources(m.sources);
 
     table.push([
       theme.value(name),
@@ -289,10 +337,18 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
       theme.muted(quant),
       theme.number(sizeGb),
       fitLabel,
-      installedIcon,
+      sourceLabel,
     ]);
   }
 
   console.log(table.toString());
   console.log();
+}
+
+function formatSources(sources: MergedModel["sources"]): string {
+  const parts: string[] = [];
+  if (sources.includes("installed")) parts.push(theme.pass("installed"));
+  if (sources.includes("curated")) parts.push(theme.value("curated"));
+  if (sources.includes("library")) parts.push(theme.muted("library"));
+  return parts.length > 0 ? parts.join(theme.muted("+")) : theme.muted("—");
 }

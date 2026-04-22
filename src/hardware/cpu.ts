@@ -1,8 +1,13 @@
 import si from "systeminformation";
+import { detectCpuTopology } from "./cpu-topology.js";
 import type { CpuInfo } from "../core/types.js";
 
 export async function detectCpu(): Promise<CpuInfo> {
-  const [cpu, flagsRaw] = await Promise.all([si.cpu(), si.cpuFlags()]);
+  const [cpu, flagsRaw, topology] = await Promise.all([
+    si.cpu(),
+    si.cpuFlags(),
+    detectCpuTopology(),
+  ]);
 
   const flags = flagsRaw.split(" ").filter(Boolean);
   const hasAvx2 = flags.includes("avx2");
@@ -29,5 +34,7 @@ export async function detectCpu(): Promise<CpuInfo> {
     architecture: process.arch,
     flags,
     hasAvx2,
+    performanceCores: topology.performanceCores,
+    efficiencyCores: topology.efficiencyCores,
   };
 }

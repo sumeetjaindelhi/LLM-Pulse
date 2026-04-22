@@ -63,7 +63,10 @@ describe("runDiagnostics", () => {
     const memCheck = report.checks.find((c) => c.label === "Unified Memory");
     expect(memCheck).toBeDefined();
     expect(memCheck!.severity).toBe("info");
-    expect(memCheck!.message).toContain("75%");
+    // Fixture: 10977 MB wired on a 16384 MB M2 → 67% of RAM. Message shape:
+    // "Apple Silicon unified memory — ~11 GB wired to GPU (67% of 16 GB total)"
+    expect(memCheck!.message).toMatch(/\d+%\s+of\s+\d+ GB/);
+    expect(memCheck!.message).toContain("wired to GPU");
   });
 
   it("warns about missing ROCm on AMD GPU without accelerator", () => {

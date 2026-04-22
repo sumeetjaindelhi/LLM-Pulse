@@ -1,4 +1,4 @@
-import { MIN_REQUIREMENTS, DOCTOR_WEIGHTS, APPLE_UNIFIED_MEMORY_FACTOR } from "../core/constants.js";
+import { MIN_REQUIREMENTS, DOCTOR_WEIGHTS } from "../core/constants.js";
 import type {
   HardwareProfile,
   RuntimeInfo,
@@ -32,15 +32,36 @@ export function runDiagnostics(
     });
   }
 
-  if (hardware.cpu.cores >= MIN_REQUIREMENTS.cpuCores) {
-    checks.push({ label: "CPU Cores", severity: "pass", message: `${hardware.cpu.cores} cores — sufficient for inference` });
+  // On hybrid CPUs (Apple Silicon, Intel Alder Lake+), weight E-cores at 60%
+  // of a P-core for inference capability. E-cores run at lower clocks and
+  // lack some SIMD features — treating them as equivalent inflates the
+  // capability score and produces over-optimistic recommendations.
+  const { cores: totalCores, performanceCores, efficiencyCores } = hardware.cpu;
+  // `!= null` catches both null and undefined (older fixtures / remote
+  // profiles missing the field entirely) without false-positive on 0.
+  const hasSplit =
+    performanceCores != null && efficiencyCores != null;
+  const effectiveCores = hasSplit
+    ? performanceCores + efficiencyCores * 0.6
+    : totalCores;
+  const hybridNote =
+    hasSplit && efficiencyCores > 0
+      ? ` (${performanceCores}P + ${efficiencyCores}E — weighted)`
+      : "";
+
+  if (effectiveCores >= MIN_REQUIREMENTS.cpuCores) {
+    checks.push({
+      label: "CPU Cores",
+      severity: "pass",
+      message: `${totalCores} cores${hybridNote} — sufficient for inference`,
+    });
     score += DOCTOR_WEIGHTS.coreCount;
   } else {
     checks.push({
       label: "CPU Cores",
       severity: "warning",
-      message: `Only ${hardware.cpu.cores} cores — may bottleneck inference`,
-      suggestion: "4+ cores recommended for smooth LLM inference.",
+      message: `Only ${totalCores} cores${hybridNote} — may bottleneck inference`,
+      suggestion: "4+ performance cores recommended for smooth LLM inference.",
     });
     score += DOCTOR_WEIGHTS.coreCount * 0.5;
   }
@@ -69,13 +90,20 @@ export function runDiagnostics(
     });
   }
 
-  // Apple Silicon unified memory info
+  // Apple Silicon unified memory info. `gpu.vramMb` is already the resolved
+  // usable cap (sysctl iogpu.wired_limit_mb, or 67% fallback) — no further
+  // multiplier needed. We show both the cap and the host RAM so the user can
+  // see how much is wired to the GPU vs. reserved for the OS.
   if (gpu && gpu.vendor === "Apple") {
-    const usableGb = Math.round((gpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR) / 1024);
+    const usableGb = Math.round(gpu.vramMb / 1024);
+    const totalGb = Math.round(hardware.memory.totalMb / 1024);
+    const pct = hardware.memory.totalMb > 0
+      ? Math.round((gpu.vramMb / hardware.memory.totalMb) * 100)
+      : 0;
     checks.push({
       label: "Unified Memory",
       severity: "info",
-      message: `Apple Silicon unified memory — ~${usableGb} GB usable for inference (75% of ${Math.round(gpu.vramMb / 1024)} GB)`,
+      message: `Apple Silicon unified memory — ~${usableGb} GB wired to GPU (${pct}% of ${totalGb} GB total)`,
     });
   }
 

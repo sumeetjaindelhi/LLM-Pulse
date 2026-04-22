@@ -14,7 +14,7 @@
     {
       "vendor": "Apple",
       "model": "Apple M2 Pro",
-      "vramMb": 16384,
+      "vramMb": 10977,
       "driverVersion": "",
       "acceleratorVersion": null,
       "acceleratorType": "metal",
@@ -39,7 +39,7 @@
   "primaryGpu": {
     "vendor": "Apple",
     "model": "Apple M2 Pro",
-    "vramMb": 16384,
+    "vramMb": 10977,
     "driverVersion": "",
     "acceleratorVersion": null,
     "acceleratorType": "metal",

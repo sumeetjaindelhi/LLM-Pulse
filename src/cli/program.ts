@@ -87,6 +87,8 @@ export function createProgram(): Command {
     .option("--fits", "Only show models that fit your hardware", false)
     .option("--live", "Include live models from Ollama", false)
     .option("--installed", "Show only installed Ollama models", false)
+    .option("--library", "Include full Ollama library catalog (ollama.com/library)", false)
+    .option("--refresh", "Bypass cache and re-scrape ollama.com/library", false)
     .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
     .option("-H, --host <url>", "Ollama API host URL")
     .action(async (opts) => {
@@ -94,8 +96,10 @@ export function createProgram(): Command {
         search: opts.search,
         category: opts.category as ModelCategory | "all",
         fits: opts.fits,
-        live: opts.live || opts.installed,
+        live: opts.live || opts.installed || opts.library || opts.refresh,
         installed: opts.installed,
+        library: opts.library || opts.refresh,
+        refresh: opts.refresh,
         format: opts.format,
         host: opts.host,
       });

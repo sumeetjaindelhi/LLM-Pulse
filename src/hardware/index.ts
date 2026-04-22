@@ -2,6 +2,7 @@ import { detectCpu } from "./cpu.js";
 import { detectGpus } from "./gpu.js";
 import { detectMemory } from "./memory.js";
 import { detectDisk } from "./disk.js";
+import { readAppleVramLimit } from "./apple-memory.js";
 import type { HardwareProfile } from "../core/types.js";
 
 let cachedProfile: HardwareProfile | null = null;
@@ -26,15 +27,16 @@ export async function detectHardware(): Promise<HardwareProfile> {
     detectDisk(),
   ]);
 
-  // Apple Silicon uses unified memory — systeminformation reports vram: null for
-  // Metal GPUs because there is no discrete VRAM pool. The Metal GPU addresses
-  // the entire system RAM, so its effective capacity equals total system memory.
-  // The ~25% OS-reserve discount is applied separately by scorer/doctor via
-  // APPLE_UNIFIED_MEMORY_FACTOR. This matches the convention encoded in the
-  // test fixture tests/fixtures/hardware-profiles/apple-m2.json.
+  // Apple Silicon uses unified memory: systeminformation reports vram: 0 for
+  // Metal GPUs because there is no discrete VRAM pool. The *actual* cap on
+  // wired GPU memory is `sysctl iogpu.wired_limit_mb` (defaults to ~67% of
+  // total RAM). We resolve it once here so downstream callers can use
+  // `primaryGpu.vramMb` as the final usable cap without further multipliers.
   for (const g of gpus) {
     if (g.acceleratorType === "metal" && g.vramMb === 0 && memory.totalMb > 0) {
-      g.vramMb = memory.totalMb;
+      const limit = await readAppleVramLimit(memory.totalMb * 1024 * 1024);
+      g.vramMb =
+        limit.vramMb ?? Math.round(memory.totalMb * limit.factor);
     }
   }
 

@@ -8,8 +8,8 @@ import { theme } from "../ui/colors.js";
 import { progressBar, formatMb } from "../ui/progress.js";
 import { recommendationTable } from "../ui/tables.js";
 import { toCsv } from "../ui/csv.js";
-import { APPLE_UNIFIED_MEMORY_FACTOR } from "../../core/constants.js";
 import { resolveOllamaHost } from "../../core/config.js";
+import { UNIFIED_MEMORY_HEADROOM_MB } from "../../core/constants.js";
 import type { ScanOptions, HardwareProfile, RuntimeInfo } from "../../core/types.js";
 
 export async function scanCommand(options: ScanOptions): Promise<void> {
@@ -82,6 +82,15 @@ export async function scanCommand(options: ScanOptions): Promise<void> {
   lines.push(
     `  ${theme.muted("Tip:")} You can comfortably run up to ${theme.highlight(`${maxParams}B`)} parameter models with Q4 quantization.`,
   );
+  // On unified memory (Apple Silicon), the raw GPU-wired limit is deceptive —
+  // every GB given to a model is a GB taken from the OS/apps pool. Explain
+  // the reservation so the number above doesn't look pessimistic.
+  if (hardware.primaryGpu?.acceleratorType === "metal") {
+    const reservedGb = (UNIFIED_MEMORY_HEADROOM_MB / 1024).toFixed(0);
+    lines.push(
+      `  ${theme.muted("Note:")} Unified memory — estimate reserves ${theme.highlight(`~${reservedGb} GB`)} for OS, editor, and other apps.`,
+    );
+  }
 
   console.log(titleBox(lines.join("\n")));
 }
@@ -143,7 +152,14 @@ async function scanCsv(options: ScanOptions, ollamaHost: string): Promise<void> 
 
 function formatCpu(hw: HardwareProfile): string {
   const c = hw.cpu;
-  const avx = c.hasAvx2 ? theme.pass("AVX2 ✓") : theme.warning("No AVX2");
+  // AVX2 is an x86-only instruction set. ARM CPUs (Apple Silicon, Snapdragon,
+  // Ampere) use NEON instead — so "No AVX2" on arm64 is a category error, not
+  // a warning. Surface NEON as a neutral fact and only warn on x86 without AVX2.
+  const avx = c.hasAvx2
+    ? theme.pass("AVX2 ✓")
+    : c.architecture === "arm64"
+      ? theme.muted("NEON")
+      : theme.warning("No AVX2");
   // Speed may be null on Apple Silicon (systeminformation can't read it).
   // Show the accelerator class instead of a bogus GHz value.
   let speedLabel: string;
@@ -220,10 +236,17 @@ function formatRuntime(rt: RuntimeInfo): string {
 }
 
 function estimateMaxParams(hw: HardwareProfile): number {
+  // primaryGpu.vramMb is already the resolved usable cap on Apple Silicon
+  // (see hardware/index.ts). On CPU-only systems we reserve ~30% of RAM
+  // for OS + app pressure before estimating. On unified-memory systems the
+  // sysctl cap doesn't account for concurrent apps sharing the same RAM
+  // pool, so we subtract a flat headroom budget to keep the estimate honest
+  // for a daily-driver machine (not a dedicated inference box).
+  const isUnifiedMemory = hw.primaryGpu?.acceleratorType === "metal";
   let vramMb: number;
   if (hw.primaryGpu) {
-    vramMb = hw.primaryGpu.vendor === "Apple"
-      ? hw.primaryGpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR
+    vramMb = isUnifiedMemory
+      ? Math.max(hw.primaryGpu.vramMb - UNIFIED_MEMORY_HEADROOM_MB, 2048)
       : hw.primaryGpu.vramMb;
   } else {
     vramMb = hw.memory.availableMb * 0.7;

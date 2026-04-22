@@ -182,7 +182,13 @@ function outputTable(
   lines.push(keyValue("RAM", `${formatMb(hardware.memory.totalMb)} ${hardware.memory.type}`));
   if (verbose) {
     lines.push(keyValue("CPU", hardware.cpu.brand));
-    lines.push(subLine(`${hardware.cpu.threads} threads · AVX2 ${hardware.cpu.hasAvx2 ? "✓" : "✗"}`));
+    // AVX2 is x86-only. On ARM, surface NEON instead of a bogus "✗".
+    const simd = hardware.cpu.hasAvx2
+      ? "AVX2 ✓"
+      : hardware.cpu.architecture === "arm64"
+        ? "NEON"
+        : "AVX2 ✗";
+    lines.push(subLine(`${hardware.cpu.threads} threads · ${simd}`));
   }
 
   // Quant warning

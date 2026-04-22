@@ -14,6 +14,12 @@ export interface CpuInfo {
   architecture: string; // x64, arm64
   flags: string[]; // AVX, AVX2, AVX-512, etc.
   hasAvx2: boolean;
+  // Split of performance vs. efficiency cores on hybrid CPUs (Apple Silicon
+  // M-series, Intel Alder Lake+). Null on symmetric-core CPUs or when the
+  // platform doesn't expose the topology. Sum may be less than `cores` on
+  // SMT-enabled Intel — physical P-cores are counted, SMT threads aren't.
+  performanceCores: number | null;
+  efficiencyCores: number | null;
 }
 
 export interface GpuInfo {
@@ -21,8 +27,8 @@ export interface GpuInfo {
   model: string;
   vramMb: number;
   driverVersion: string;
-  acceleratorVersion: string | null; // CUDA for NVIDIA, ROCm for AMD, Metal for Apple
-  acceleratorType: "cuda" | "rocm" | "metal" | null;
+  acceleratorVersion: string | null; // CUDA for NVIDIA, ROCm for AMD, Metal for Apple, oneAPI/Level Zero for Intel
+  acceleratorType: "cuda" | "rocm" | "metal" | "oneapi" | null;
   utilizationPercent: number | null;
   temperatureCelsius: number | null;
   vramUsedMb: number | null;
@@ -88,11 +94,22 @@ export interface OllamaModel {
   family: string; // "llama" from details
 }
 
+export interface LibraryCatalogModel {
+  slug: string; // "llama3.1"
+  description: string;
+  parameterSizes: string[]; // ["8b", "70b", "405b"]
+  capabilities: string[]; // ["tools", "thinking"]
+}
+
+export type MergedModelSource = "curated" | "library" | "installed";
+
 export interface MergedModel {
-  entry: ModelEntry | null; // from DB (null if Ollama-only)
-  ollamaModel: OllamaModel | null; // from Ollama (null if DB-only)
-  installed: boolean; // true if found in Ollama
-  ollamaTag: string | null; // the tag used in Ollama
+  entry: ModelEntry | null; // from curated DB (null if not curated)
+  ollamaModel: OllamaModel | null; // from /api/tags (null if not installed)
+  libraryModel: LibraryCatalogModel | null; // from ollama.com/library (null if not discovered)
+  installed: boolean;
+  ollamaTag: string | null; // canonical pull tag
+  sources: MergedModelSource[]; // which backends contributed to this row
 }
 
 // ── Scoring ───────────────────────────────────

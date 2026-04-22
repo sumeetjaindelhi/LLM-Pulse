@@ -44,8 +44,23 @@ export const MIN_REQUIREMENTS = {
   cpuCores: 4,
 } as const;
 
-// Apple Silicon unified memory — ~25% reserved for OS + apps
-export const APPLE_UNIFIED_MEMORY_FACTOR = 0.75;
+// Apple Silicon wired-GPU-memory cap. macOS enforces `iogpu.wired_limit_mb`
+// which defaults to ~67% of total RAM on Apple Silicon (the remainder is
+// reserved for OS + CPU processes and cannot be wired for GPU use). The
+// runtime reader `hardware/apple-memory.ts` prefers the live sysctl value;
+// this constant is the fallback when sysctl is unreachable. 0.67 is the
+// conservative default documented by Apple for long-running ML workloads.
+// Previous value 0.75 was overoptimistic — it produced "fits" verdicts on
+// models that hit OOM during real inference on high-memory Macs.
+export const APPLE_UNIFIED_MEMORY_FACTOR_FALLBACK = 0.67;
+
+// On unified-memory systems, the sysctl GPU-wired limit is the theoretical
+// ceiling, but real-world usage has to share with the OS, IDE, Node, and
+// every other app drawing from the same RAM pool. Subtracting this flat
+// headroom from the max-params estimate keeps the "you can run up to NB"
+// tip honest for daily-driver machines. 6 GB covers a modern dev setup
+// (OS + browser + editor + Node + small tools) with margin for spikes.
+export const UNIFIED_MEMORY_HEADROOM_MB = 6144;
 
 // Runtime detection
 export const OLLAMA_API_URL = "http://127.0.0.1:11434";
@@ -58,8 +73,43 @@ export const ALERT_THRESHOLDS = {
   gpuUnderutilizedPercent: 20,
   noModelTimeoutMs: 5 * 60 * 1000, // 5 minutes
   sparklineHistory: 60, // number of data points
-  gpuTempHighCelsius: 80,
+  gpuTempHighCelsius: 80, // vendor-agnostic default; prefer GPU_TEMP_THRESHOLDS_BY_VENDOR
 } as const;
+
+// Vendor-specific "this GPU is getting hot" thresholds. Apple Silicon runs
+// fanless and thermally-throttles around 72°C; raising the alert line that
+// high would miss real throttle events. NVIDIA/AMD desktops tolerate 85°C
+// comfortably; laptop SKUs throttle earlier (around 78°C for mobile GPUs).
+// Intel Arc dGPUs sit closer to NVIDIA desktop territory.
+export const GPU_TEMP_THRESHOLDS_BY_VENDOR = {
+  apple: 72,
+  nvidia_desktop: 85,
+  nvidia_mobile: 78,
+  amd: 85,
+  intel: 85,
+  unknown: 80,
+} as const;
+
+export type GpuTempThresholdKey = keyof typeof GPU_TEMP_THRESHOLDS_BY_VENDOR;
+
+/** Pick the right temp threshold for a GPU. `isMobile` is a best-effort hint
+ *  from the model string — "Laptop GPU" / "Mobile" / "Max-Q" / "Max-P" in
+ *  the name all raise the flag. Callers that don't know should pass false.
+ */
+export function pickGpuTempThreshold(vendor: string, isMobile: boolean): number {
+  const v = vendor.toLowerCase();
+  if (v.includes("apple")) return GPU_TEMP_THRESHOLDS_BY_VENDOR.apple;
+  if (v.includes("nvidia")) {
+    return isMobile
+      ? GPU_TEMP_THRESHOLDS_BY_VENDOR.nvidia_mobile
+      : GPU_TEMP_THRESHOLDS_BY_VENDOR.nvidia_desktop;
+  }
+  if (v.includes("amd") || v.includes("advanced micro")) {
+    return GPU_TEMP_THRESHOLDS_BY_VENDOR.amd;
+  }
+  if (v.includes("intel")) return GPU_TEMP_THRESHOLDS_BY_VENDOR.intel;
+  return GPU_TEMP_THRESHOLDS_BY_VENDOR.unknown;
+}
 
 // Expected tok/s baselines by GPU tier + model size (rough estimates)
 // Format: { [vramTierGb]: { [paramBillion]: expectedTokPerSec } }

@@ -1,4 +1,4 @@
-import { FIT_THRESHOLDS, APPLE_UNIFIED_MEMORY_FACTOR } from "../core/constants.js";
+import { FIT_THRESHOLDS } from "../core/constants.js";
 import type {
   HardwareProfile,
   ModelEntry,
@@ -23,15 +23,15 @@ export function deriveVerdict(fitLevel: FitLevel): Verdict {
 }
 
 export function getAvailableVram(hardware: HardwareProfile): number {
-  // Only use the GPU path when the GPU has a non-zero VRAM capacity. A GPU
-  // with vramMb === 0 (e.g. an Intel iGPU that systeminformation couldn't
-  // probe) should fall back to the CPU/RAM path — otherwise the scorer
-  // concludes "zero VRAM available → nothing fits" on systems that should
-  // be rated CPU-only.
+  // `primaryGpu.vramMb` is already the final usable cap — on Apple Silicon,
+  // the wired-memory limit has been applied in `detectHardware`; on discrete
+  // GPUs it's the actual VRAM reported by nvidia-smi / rocm-smi.
+  //
+  // Guard on vramMb > 0: a GPU with zero reported VRAM (e.g. an Intel iGPU
+  // systeminformation couldn't probe) should fall back to the CPU/RAM path
+  // rather than forcing every model into cannot_run.
   if (hardware.primaryGpu && hardware.primaryGpu.vramMb > 0) {
-    return hardware.primaryGpu.vendor === "Apple"
-      ? Math.round(hardware.primaryGpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR)
-      : hardware.primaryGpu.vramMb;
+    return hardware.primaryGpu.vramMb;
   }
   return hardware.memory.availableMb;
 }
@@ -84,18 +84,12 @@ export function scoreModel(
   category: ModelCategory | "all" = "all",
 ): ModelScore {
   // Use GPU VRAM if available, otherwise use RAM (CPU inference).
-  // Apple Silicon uses unified memory — apply 75% discount (OS + apps consume ~25%).
-  // Guard on vramMb > 0: a GPU with zero reported VRAM (e.g. Intel iGPU that
-  // systeminformation couldn't probe) should fall back to the CPU path rather
-  // than forcing every model into cannot_run.
-  let availableVramMb: number;
-  if (hardware.primaryGpu && hardware.primaryGpu.vramMb > 0) {
-    availableVramMb = hardware.primaryGpu.vendor === "Apple"
-      ? Math.round(hardware.primaryGpu.vramMb * APPLE_UNIFIED_MEMORY_FACTOR)
-      : hardware.primaryGpu.vramMb;
-  } else {
-    availableVramMb = hardware.memory.availableMb;
-  }
+  // `primaryGpu.vramMb` is the already-resolved usable cap — Apple Silicon's
+  // wired-memory limit is applied in `detectHardware`, so no multiplier here.
+  const availableVramMb =
+    hardware.primaryGpu && hardware.primaryGpu.vramMb > 0
+      ? hardware.primaryGpu.vramMb
+      : hardware.memory.availableMb;
 
   const fitRatio = getFitRatio(availableVramMb, quant.vramMb);
   const fitLevel = classifyFit(availableVramMb, quant.vramMb);

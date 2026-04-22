@@ -84,23 +84,25 @@ describe("scoreModel", () => {
     expect(score.speedEstimate).toBe("fast");
   });
 
-  it("applies Apple unified memory 0.75 factor", () => {
+  it("treats Apple Silicon vramMb as the resolved wired-memory cap", () => {
+    // As of v0.9.0, `primaryGpu.vramMb` is the already-resolved usable VRAM
+    // (sysctl iogpu.wired_limit_mb, or 67% of RAM as fallback). No factor is
+    // applied by the scorer — it trusts the detector. Fixture sets 10977 MB
+    // (67% of a 16 GB M2 Pro, matching macOS's default wired limit).
     const q4 = dummyModel.quantizations[0]; // 4500 MB needed
     const score = scoreModel(dummyModel, q4, appleM2 as HardwareProfile);
 
-    // Apple M2 has 16384 MB VRAM, after 0.75 factor → 12288 MB available
-    // 12288 / 4500 = 2.73 → excellent
+    // 10977 / 4500 = 2.44 → excellent (>= 1.5x headroom)
     expect(score.fitLevel).toBe("excellent");
 
-    // Now test with a model that barely fits after discount
+    // A quantization that barely fits after cap
     const bigQuant: QuantizationVariant = {
       name: "Q8_0",
       bitsPerWeight: 8.5,
-      vramMb: 14000, // 14 GB needed, 12288 available after factor → cannot_run
+      vramMb: 13000, // 10977 / 13000 = 0.844 → barely (>= 0.75, < 1.0)
       qualityRetention: 0.99,
     };
     const bigScore = scoreModel(dummyModel, bigQuant, appleM2 as HardwareProfile);
-    // 12288 / 14000 = 0.878 → barely (>= 0.75, < 1.0)
     expect(bigScore.fitLevel).toBe("barely");
   });
 
