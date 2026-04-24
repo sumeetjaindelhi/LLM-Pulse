@@ -1,7 +1,7 @@
 import ora from "ora";
 import Table from "cli-table3";
 import { detectHardware } from "../../hardware/index.js";
-import { scoreModel, deriveVerdict, getAvailableVram } from "../../analysis/scorer.js";
+import { scoreModel, deriveVerdict, getAvailableVram, suggestGpuOffload } from "../../analysis/scorer.js";
 import { resolveModel, searchModels } from "../../models/database.js";
 import { titleBox, sectionHeader, keyValue, subLine } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
@@ -14,6 +14,7 @@ import type {
   HardwareProfile,
   Verdict,
   CheckOptions,
+  GpuOffloadSuggestion,
 } from "../../core/types.js";
 
 function formatContext(ctx: number): string {
@@ -129,13 +130,18 @@ export async function checkCommand(
   const availableVramMb = getAvailableVram(hardware);
   const pullCommand = model.ollamaTag ? `ollama pull ${model.ollamaTag}` : null;
 
+  // GPU layer-offload suggestion for the best-scoring quant. Useful when a
+  // model is close to fitting (partial offload) or clearly over the line but
+  // the user still wants to squeeze it on with CPU help.
+  const offload = suggestGpuOffload(model, bestScore.quantization, hardware);
+
   // 6. Output
   if (isJson) {
-    outputJson(model, hardware, scores, bestScore, verdict, availableVramMb, pullCommand);
+    outputJson(model, hardware, scores, bestScore, verdict, availableVramMb, pullCommand, offload);
   } else if (isCsv) {
     outputCsv(scores, availableVramMb, bestIdx);
   } else {
-    outputTable(model, hardware, scores, bestScore, bestIdx, verdict, availableVramMb, pullCommand, quantWarning, options.verbose);
+    outputTable(model, hardware, scores, bestScore, bestIdx, verdict, availableVramMb, pullCommand, quantWarning, options.verbose, offload);
   }
 }
 
@@ -150,6 +156,7 @@ function outputTable(
   pullCommand: string | null,
   quantWarning: string | null,
   verbose: boolean,
+  offload: GpuOffloadSuggestion | null,
 ): void {
   const lines: string[] = [];
 
@@ -213,6 +220,21 @@ function outputTable(
     lines.push(`  ${theme.muted("Try a smaller model:")} ${theme.command("llm-pulse models --fits")}`);
   }
 
+  // GPU offload tip — only surface when the suggestion adds information beyond
+  // the default. `full_fit` on a well-fitting quant is the happy path (Ollama
+  // already offloads everything); showing "all layers on GPU" there is noise.
+  // For `barely` and `cannot_run` the partial split is the actionable hint.
+  if (offload && offload.reason === "partial_offload") {
+    lines.push(sectionHeader("GPU Layer Offload"));
+    lines.push(`  ${theme.pass("⚡")} Put ${theme.value(String(offload.gpuLayers))} of ${theme.value(String(offload.totalLayers))} layers on GPU (~${formatMb(offload.estimatedVramUsedMb)}), rest on CPU`);
+    if (offload.ollamaCommand) {
+      lines.push(`  ${theme.muted("After")} ${theme.command(`ollama run ${model.ollamaTag}`)}${theme.muted(", type:")} ${theme.command(offload.ollamaCommand)}`);
+    }
+  } else if (offload && offload.reason === "too_small" && verdict === "no") {
+    lines.push(sectionHeader("GPU Layer Offload"));
+    lines.push(`  ${theme.fail("✗")} VRAM too small for meaningful offload — consider a lighter quant or CPU-only inference`);
+  }
+
   console.log(titleBox(lines.join("\n")));
 }
 
@@ -224,6 +246,7 @@ function outputJson(
   verdict: Verdict,
   availableVramMb: number,
   pullCommand: string | null,
+  offload: GpuOffloadSuggestion | null,
 ): void {
   const output = {
     model: {
@@ -259,6 +282,7 @@ function outputJson(
       speedEstimate: s.speedEstimate,
     })),
     pullCommand,
+    gpuOffload: offload,
   };
 
   console.log(JSON.stringify(output, null, 2));

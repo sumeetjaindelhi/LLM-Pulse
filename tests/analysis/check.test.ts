@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { scoreModel, deriveVerdict } from "../../src/analysis/scorer.js";
+import { scoreModel, deriveVerdict, suggestGpuOffload } from "../../src/analysis/scorer.js";
 import { resolveModel, getModelById, searchModels } from "../../src/models/database.js";
 import type { HardwareProfile, FitLevel } from "../../src/core/types.js";
 import highEnd from "../fixtures/hardware-profiles/high-end-nvidia.json";
 import cpuOnly from "../fixtures/hardware-profiles/cpu-only.json";
+import appleM2 from "../fixtures/hardware-profiles/apple-m2.json";
 
 describe("deriveVerdict", () => {
   it("returns 'yes' for excellent fit", () => {
@@ -82,6 +83,62 @@ describe("check command logic", () => {
       // GPT-4o is not an Ollama model — should have no tag
       expect(model.ollamaTag).toBeNull();
     }
+  });
+});
+
+describe("suggestGpuOffload", () => {
+  it("returns full_fit for a model that fits entirely on a high-end GPU", () => {
+    const model = getModelById("llama-3.1-8b")!;
+    const quant = model.quantizations[0]; // Q4_K_M, 5000 MB
+    const suggestion = suggestGpuOffload(model, quant, highEnd as HardwareProfile);
+
+    expect(suggestion).not.toBeNull();
+    expect(suggestion!.reason).toBe("full_fit");
+    expect(suggestion!.gpuLayers).toBe("all");
+    expect(suggestion!.ollamaCommand).toBe("ollama run llama3.1:8b");
+  });
+
+  it("returns partial_offload when a large model overflows a mid-VRAM GPU", () => {
+    const model = getModelById("llama-3.1-70b")!;
+    const q4 = model.quantizations[0]; // Q4_K_M, 40000 MB — larger than 24 GB RTX 4090
+    const suggestion = suggestGpuOffload(model, q4, highEnd as HardwareProfile);
+
+    expect(suggestion).not.toBeNull();
+    expect(suggestion!.reason).toBe("partial_offload");
+    expect(typeof suggestion!.gpuLayers).toBe("number");
+    expect(suggestion!.gpuLayers).toBeGreaterThan(0);
+    expect(suggestion!.gpuLayers).toBeLessThan(suggestion!.totalLayers);
+    // Recommendation must leave headroom — estimated VRAM used stays below the 24 GB ceiling.
+    expect(suggestion!.estimatedVramUsedMb).toBeLessThanOrEqual(24576);
+    expect(suggestion!.ollamaCommand).toContain("/set parameter num_gpu");
+  });
+
+  it("returns null on Apple Silicon (unified memory — no offload split)", () => {
+    const model = getModelById("llama-3.1-8b")!;
+    const quant = model.quantizations[0];
+    const suggestion = suggestGpuOffload(model, quant, appleM2 as HardwareProfile);
+    expect(suggestion).toBeNull();
+  });
+
+  it("returns null on CPU-only systems (no GPU to offload to)", () => {
+    const model = getModelById("llama-3.1-8b")!;
+    const quant = model.quantizations[0];
+    const suggestion = suggestGpuOffload(model, quant, cpuOnly as HardwareProfile);
+    expect(suggestion).toBeNull();
+  });
+
+  it("estimates more layers for a smaller model at the same VRAM budget", () => {
+    const big = getModelById("llama-3.1-70b")!;
+    const small = getModelById("llama-3.2-3b")!;
+    const bigQ = big.quantizations[0];
+    const smallQ = small.quantizations[0];
+
+    const bigSuggestion = suggestGpuOffload(big, bigQ, highEnd as HardwareProfile);
+    const smallSuggestion = suggestGpuOffload(small, smallQ, highEnd as HardwareProfile);
+
+    // 70B Q4 overflows and gets a partial count; 3B fits entirely.
+    expect(bigSuggestion!.reason).toBe("partial_offload");
+    expect(smallSuggestion!.reason).toBe("full_fit");
   });
 });
 

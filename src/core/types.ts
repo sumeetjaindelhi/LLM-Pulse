@@ -268,3 +268,19 @@ export interface CheckOptions {
   verbose: boolean;
   host?: string;
 }
+
+export type OffloadReason = "full_fit" | "partial_offload" | "too_small";
+
+// GPU layer-offload guidance for a specific model+quant+GPU combo.
+// `gpuLayers = "all"` means the full model fits on the GPU with headroom;
+// a number means "put this many transformer blocks on the GPU, run the
+// rest on CPU" (maps to `num_gpu` in Ollama / `--n-gpu-layers` in llama.cpp).
+// Skipped entirely (caller gets null) on unified-memory systems and when
+// there's no discrete GPU to offload to.
+export interface GpuOffloadSuggestion {
+  gpuLayers: number | "all";
+  totalLayers: number;
+  estimatedVramUsedMb: number;
+  reason: OffloadReason;
+  ollamaCommand: string | null;
+}

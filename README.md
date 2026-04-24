@@ -41,6 +41,19 @@ llm-pulse --category coding --top 3  # Top 3 coding models
 | `-t, --top <n>` | Number of recommendations | `5` |
 | `-v, --verbose` | Detailed output | `false` |
 
+### `llm-pulse check <model>`
+
+"Can I run this model?" verdict with GPU layer-offload guidance when it doesn't fully fit.
+
+```bash
+llm-pulse check llama3.1:8b          # Check a specific model
+llm-pulse check llama3.1:70b         # Overflow case — shows partial-offload tip
+llm-pulse check qwen2.5-coder:14b --quant Q4_K_M
+llm-pulse check llama3.1:70b --format json
+```
+
+When a model overflows your VRAM, the `GPU Layer Offload` section tells you how many transformer blocks to put on the GPU (maps to Ollama `num_gpu` / llama.cpp `--n-gpu-layers`) with the rest on CPU — e.g. "Put 44 of 80 layers on GPU (~22 GB), rest on CPU". Hidden on Apple Silicon (unified memory) and CPU-only systems.
+
 ### `llm-pulse doctor`
 
 System health check — scores your setup and gives suggestions.
@@ -48,14 +61,17 @@ System health check — scores your setup and gives suggestions.
 ```bash
 llm-pulse doctor
 llm-pulse doctor --format json
+llm-pulse doctor --fix              # Auto-fix detected issues
 ```
 
 ### `llm-pulse models`
 
-Browse the model database filtered for your hardware.
+Browse the model database filtered for your hardware. Pulls in the live ollama.com/library catalog (cached 24 h) on top of the curated database.
 
 ```bash
-llm-pulse models                      # All 45+ models
+llm-pulse models                      # Curated set (48 models)
+llm-pulse models --library            # Full Ollama library (245+ models)
+llm-pulse models --refresh            # Force refresh library cache
 llm-pulse models --search llama       # Search by name
 llm-pulse models --category coding    # Filter by category
 llm-pulse models --fits               # Only models that fit your VRAM
@@ -131,7 +147,7 @@ Exposed tools:
 
 **Runtimes:** [Ollama](https://ollama.com), [llama.cpp](https://github.com/ggerganov/llama.cpp), [LM Studio](https://lmstudio.ai)
 
-**Models:** 45+ models across general, coding, reasoning, creative, multilingual — each with Q4/Q5/Q8/F16 quantization variants
+**Models:** 48 curated + 245+ via live Ollama library catalog (cached 24 h) — across general, coding, reasoning, creative, multilingual — each with Q4/Q5/Q8/F16 quantization variants
 
 ## License
 

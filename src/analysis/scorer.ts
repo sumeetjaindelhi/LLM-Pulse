@@ -7,6 +7,7 @@ import type {
   FitLevel,
   ModelCategory,
   Verdict,
+  GpuOffloadSuggestion,
 } from "../core/types.js";
 
 export function deriveVerdict(fitLevel: FitLevel): Verdict {
@@ -137,5 +138,77 @@ export function scoreModel(
     fitRatio,
     compositeScore,
     speedEstimate: estimateSpeed(fitLevel, model.parametersBillion, !!hardware.primaryGpu),
+  };
+}
+
+// Rough transformer-block count for common model sizes. Ollama's `num_gpu`
+// maps to llama.cpp's `--n-gpu-layers`: how many blocks live on GPU, with
+// the rest on CPU. Layer counts come from published configs for mainstream
+// Llama / Qwen / Gemma / DeepSeek families. Exact counts vary ±20% across
+// architectures, but the resulting VRAM/layer estimate is close enough to
+// guide offload tuning — and param count is the only field the curated DB
+// reliably carries.
+function estimateTotalLayers(paramsBillion: number): number {
+  if (paramsBillion <= 1.5) return 16;
+  if (paramsBillion <= 4) return 28;
+  if (paramsBillion <= 9) return 32;
+  if (paramsBillion <= 15) return 40;
+  if (paramsBillion <= 22) return 42;
+  if (paramsBillion <= 35) return 48;
+  if (paramsBillion <= 80) return 80;
+  return 126;
+}
+
+// Leave ~10% of VRAM for KV cache, attention workspace, and runtime overhead.
+// Without this a "perfect" weight-only fit OOMs the first time context grows.
+const OFFLOAD_KV_HEADROOM = 0.9;
+
+export function suggestGpuOffload(
+  model: ModelEntry,
+  quant: QuantizationVariant,
+  hardware: HardwareProfile,
+): GpuOffloadSuggestion | null {
+  const gpu = hardware.primaryGpu;
+  if (!gpu || gpu.vramMb <= 0) return null;
+  // Unified memory: `num_gpu` is effectively "all" by default and the CPU/GPU
+  // split isn't meaningful — weights live in the same RAM pool either way.
+  if (gpu.acceleratorType === "metal") return null;
+
+  const availableVramMb = gpu.vramMb;
+  const totalLayers = estimateTotalLayers(model.parametersBillion);
+  const weightsPerLayer = quant.vramMb / totalLayers;
+  const usableVramForWeights = availableVramMb * OFFLOAD_KV_HEADROOM;
+  const layersThatFit = Math.floor(usableVramForWeights / weightsPerLayer);
+
+  const tag = model.ollamaTag;
+
+  if (layersThatFit >= totalLayers) {
+    return {
+      gpuLayers: "all",
+      totalLayers,
+      estimatedVramUsedMb: quant.vramMb,
+      reason: "full_fit",
+      ollamaCommand: tag ? `ollama run ${tag}` : null,
+    };
+  }
+
+  if (layersThatFit < 1) {
+    return {
+      gpuLayers: 0,
+      totalLayers,
+      estimatedVramUsedMb: 0,
+      reason: "too_small",
+      ollamaCommand: null,
+    };
+  }
+
+  return {
+    gpuLayers: layersThatFit,
+    totalLayers,
+    estimatedVramUsedMb: Math.round(layersThatFit * weightsPerLayer),
+    reason: "partial_offload",
+    // Ollama sets `num_gpu` via an interactive `/set parameter` line after
+    // `ollama run`, or via a Modelfile `PARAMETER` — there's no CLI flag.
+    ollamaCommand: tag ? `/set parameter num_gpu ${layersThatFit}` : null,
   };
 }
