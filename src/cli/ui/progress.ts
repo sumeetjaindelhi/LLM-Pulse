@@ -26,3 +26,7 @@ export function formatMb(mb: number): string {
   }
   return `${mb.toLocaleString()} MB`;
 }
+
+export function formatQualityPct(retention: number): string {
+  return `${Math.round(retention * 100)}%`;
+}

@@ -1,7 +1,21 @@
 import Table from "cli-table3";
 import { theme } from "./colors.js";
 import { fitBadge } from "./badges.js";
+import { isCriticalFit } from "../../analysis/scorer.js";
 import type { Recommendation, ModelScore } from "../../core/types.js";
+
+// Shared cli-table3 character config for the project's borderless / compact
+// table style — empty borders, two-space gutter on the left and between cells.
+// Imported by every table-rendering site (check, quant-advice, models, etc.)
+// so that all tables share the same shape.
+export const borderlessTableChars = {
+  top: "", "top-mid": "", "top-left": "", "top-right": "",
+  bottom: "", "bottom-mid": "", "bottom-left": "", "bottom-right": "",
+  left: "  ", "left-mid": "",
+  mid: "", "mid-mid": "",
+  right: "", "right-mid": "",
+  middle: "  ",
+} as const;
 
 export function recommendationTable(
   recommendations: Recommendation[],
@@ -21,14 +35,7 @@ export function recommendationTable(
   const table = new Table({
     head: headCols,
     style: { head: [], border: ["gray"], compact: true },
-    chars: {
-      top: "", "top-mid": "", "top-left": "", "top-right": "",
-      bottom: "", "bottom-mid": "", "bottom-left": "", "bottom-right": "",
-      left: "  ", "left-mid": "",
-      mid: "", "mid-mid": "",
-      right: "", "right-mid": "",
-      middle: "  ",
-    },
+    chars: borderlessTableChars,
   });
 
   for (const rec of recommendations) {
@@ -53,7 +60,7 @@ export function recommendationTable(
   return table.toString();
 }
 
-function speedLabel(speed: "fast" | "moderate" | "slow"): string {
+export function speedLabel(speed: "fast" | "moderate" | "slow"): string {
   switch (speed) {
     case "fast": return theme.pass("fast");
     case "moderate": return theme.warning("moderate");
@@ -76,14 +83,7 @@ export function comparisonTable(
   const table = new Table({
     head: headerRow,
     style: { head: [], border: ["gray"], compact: true },
-    chars: {
-      top: "", "top-mid": "", "top-left": "", "top-right": "",
-      bottom: "", "bottom-mid": "", "bottom-left": "", "bottom-right": "",
-      left: "  ", "left-mid": "",
-      mid: "", "mid-mid": "",
-      right: "", "right-mid": "",
-      middle: "  ",
-    },
+    chars: borderlessTableChars,
   });
 
   // Model info rows
@@ -104,7 +104,7 @@ export function comparisonTable(
   table.push(row("VRAM", scores.map((s) => {
     const reqGb = (s.quantization.vramMb / 1024).toFixed(0);
     const availGb = (availableVramMb / 1024).toFixed(0);
-    const color = s.fitLevel === "cannot_run" || s.fitLevel === "barely" ? theme.fail
+    const color = isCriticalFit(s.fitLevel) ? theme.fail
       : s.fitLevel === "tight" ? theme.warning
       : theme.pass;
     return color(`${reqGb} GB / ${availGb} GB`);

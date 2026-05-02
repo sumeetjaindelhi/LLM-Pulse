@@ -1,5 +1,5 @@
 import { getAllModels, filterByCategory } from "../models/database.js";
-import { scoreModel } from "./scorer.js";
+import { scoreModel, isFitting } from "./scorer.js";
 import type {
   HardwareProfile,
   ModelCategory,
@@ -17,7 +17,7 @@ export function getRecommendations(
 ): Recommendation[] {
   const { category = "all", top = 5, onlyFitting = false } = options;
 
-  const models = category === "all" ? getAllModels() : filterByCategory(category);
+  const models = filterByCategory(category);
 
   // Score every model+quantization combination
   const allScores: ModelScore[] = [];
@@ -35,13 +35,14 @@ export function getRecommendations(
 
   // Filter out models that can't run if requested
   const filtered = onlyFitting
-    ? allScores.filter((s) => s.fitLevel !== "cannot_run")
+    ? allScores.filter((s) => isFitting(s.fitLevel))
     : allScores;
 
-  // Sort by composite score descending, then by fit ratio
+  // Sort by composite score descending; non-fitting models always sink last.
   const sorted = filtered.sort((a, b) => {
-    if (a.fitLevel === "cannot_run" && b.fitLevel !== "cannot_run") return 1;
-    if (b.fitLevel === "cannot_run" && a.fitLevel !== "cannot_run") return -1;
+    const aFits = isFitting(a.fitLevel);
+    const bFits = isFitting(b.fitLevel);
+    if (aFits !== bFits) return aFits ? -1 : 1;
     return b.compositeScore - a.compositeScore;
   });
 

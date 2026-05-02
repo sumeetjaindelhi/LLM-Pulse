@@ -76,6 +76,7 @@ describe("scoreModel", () => {
   });
 });
 
+describe("scoreModel — fixture profiles", () => {
   it("scores windows-nvidia RTX 4090 as excellent fit for 7B Q4", () => {
     const q4 = dummyModel.quantizations[0]; // 4500 MB needed
     const score = scoreModel(dummyModel, q4, windowsNvidia as HardwareProfile);
@@ -131,6 +132,7 @@ describe("scoreModel", () => {
     // floor is 2048 MB → 2048 / 1500 = 1.37 → comfortable
     expect(score.fitLevel).toBe("comfortable");
   });
+});
 
 describe("getRecommendations", () => {
   it("returns top N recommendations sorted by score", () => {

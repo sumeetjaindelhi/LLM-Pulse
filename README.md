@@ -54,6 +54,18 @@ llm-pulse check llama3.1:70b --format json
 
 When a model overflows your VRAM, the `GPU Layer Offload` section tells you how many transformer blocks to put on the GPU (maps to Ollama `num_gpu` / llama.cpp `--n-gpu-layers`) with the rest on CPU — e.g. "Put 44 of 80 layers on GPU (~22 GB), rest on CPU". Hidden on Apple Silicon (unified memory) and CPU-only systems.
 
+### `llm-pulse quant-advice <model>`
+
+Which quantization should you actually pick? Shows a quality-vs-VRAM tradeoff table with the sweet-spot recommendation for your hardware — the largest quant that still fits comfortably.
+
+```bash
+llm-pulse quant-advice llama3.1:8b       # Sweet-spot pick + full tradeoff table
+llm-pulse quant-advice llama3.1:70b      # "Nothing fits" → redirects to check for offload tips
+llm-pulse quant-advice qwen2.5-coder:14b --format json
+```
+
+Each row gets a note: "Sweet spot — best quality you can fit", "Smaller — faster, slight quality drop", "Overkill — negligible quality gain", "Too big — overflows VRAM", etc. The recommendation follows the llama.cpp community heuristic: buy the most quality you can afford in VRAM, since gains at the high end are real but diminishing.
+
 ### `llm-pulse doctor`
 
 System health check — scores your setup and gives suggestions.

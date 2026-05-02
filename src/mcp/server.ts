@@ -5,9 +5,10 @@ import { detectHardware } from "../hardware/index.js";
 import { HardwareMonitor } from "../hardware/monitor.js";
 import { detectAllRuntimes } from "../runtimes/index.js";
 import { getAllModels, searchModels, filterByCategory, resolveModel } from "../models/database.js";
+import { modelNotFoundPayload } from "../cli/ui/errors.js";
 import { fetchOllamaModels, clearOllamaCache } from "../models/ollama-models.js";
 import { getRecommendations } from "../analysis/recommender.js";
-import { scoreModel, deriveVerdict, getAvailableVram } from "../analysis/scorer.js";
+import { scoreModel, deriveVerdict, getAvailableVram, isFitting } from "../analysis/scorer.js";
 import { runDiagnostics } from "../analysis/doctor.js";
 import { resolveOllamaHost } from "../core/config.js";
 import { VERSION } from "../core/constants.js";
@@ -88,16 +89,11 @@ server.tool(
       const model = resolveModel(modelArg);
 
       if (!model) {
-        const suggestions = searchModels(modelArg).slice(0, 5);
         return {
           isError: true,
           content: [{
             type: "text" as const,
-            text: JSON.stringify({
-              error: "Model not found",
-              query: modelArg,
-              suggestions: suggestions.map((s) => ({ id: s.id, name: s.name, ollamaTag: s.ollamaTag })),
-            }, null, 2),
+            text: JSON.stringify(modelNotFoundPayload(modelArg), null, 2),
           }],
         };
       }
@@ -288,14 +284,7 @@ server.tool(
   async ({ search, category, fits }) => {
     try {
       // Resolve models from database
-      let models;
-      if (search) {
-        models = searchModels(search);
-      } else if (category !== "all") {
-        models = filterByCategory(category as ModelCategory);
-      } else {
-        models = getAllModels();
-      }
+      const models = search ? searchModels(search) : filterByCategory(category);
 
       // If --fits, scan hardware and score/filter
       if (fits) {
@@ -317,7 +306,7 @@ server.tool(
           .map((model): ScoredModel | null => {
             const scores = model.quantizations
               .map((q) => scoreModel(model, q, hardware))
-              .filter((s) => s.fitLevel !== "cannot_run")
+              .filter((s) => isFitting(s.fitLevel))
               .sort((a, b) => b.compositeScore - a.compositeScore);
 
             if (scores.length === 0) return null;

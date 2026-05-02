@@ -7,9 +7,10 @@ import { modelsCommand } from "./commands/models.js";
 import { benchmarkCommand } from "./commands/benchmark.js";
 import { compareCommand } from "./commands/compare.js";
 import { checkCommand } from "./commands/check.js";
+import { quantAdviceCommand } from "./commands/quant-advice.js";
 import { profileCommand } from "./commands/profile.js";
 import { parseIntSafe } from "./utils/parse-int-safe.js";
-import type { ScanOptions, ModelCategory, OutputFormat, CheckOptions } from "../core/types.js";
+import type { ScanOptions, ModelCategory, OutputFormat, CheckOptions, QuantAdviceOptions } from "../core/types.js";
 
 export function createProgram(): Command {
   const config = loadConfig();
@@ -34,14 +35,12 @@ export function createProgram(): Command {
     .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
     .option("-c, --category <category>", "Filter by category (general, coding, reasoning, creative, multilingual)", defaultCategory)
     .option("-t, --top <n>", "Number of recommendations", defaultTop)
-    .option("-v, --verbose", "Show detailed output", false)
     .option("-H, --host <url>", "Ollama API host URL")
     .action(async (opts) => {
       const options: ScanOptions = {
         format: opts.format as OutputFormat,
         category: opts.category as ModelCategory | "all",
         top: parseIntSafe(opts.top, defaultTopNum, "top"),
-        verbose: opts.verbose,
         host: opts.host,
       };
       await scanCommand(options);
@@ -54,14 +53,12 @@ export function createProgram(): Command {
     .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
     .option("-c, --category <category>", "Filter by category", defaultCategory)
     .option("-t, --top <n>", "Number of recommendations", defaultTop)
-    .option("-v, --verbose", "Show detailed output", false)
     .option("-H, --host <url>", "Ollama API host URL")
     .action(async (opts) => {
       const options: ScanOptions = {
         format: opts.format as OutputFormat,
         category: opts.category as ModelCategory | "all",
         top: parseIntSafe(opts.top, defaultTopNum, "top"),
-        verbose: opts.verbose,
         host: opts.host,
       };
       await scanCommand(options);
@@ -140,6 +137,20 @@ export function createProgram(): Command {
         host: opts.host,
       };
       await checkCommand(model, options);
+    });
+
+  // Quant-advice command — quality-vs-VRAM tradeoff picker for a model.
+  program
+    .command("quant-advice <model>")
+    .description("Which quantization should I use? Quality-vs-VRAM tradeoff table with a sweet-spot pick for your hardware")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-v, --verbose", "Show extra details", false)
+    .action(async (model: string, opts) => {
+      const options: QuantAdviceOptions = {
+        format: opts.format as OutputFormat,
+        verbose: opts.verbose,
+      };
+      await quantAdviceCommand(model, options);
     });
 
   // Monitor command

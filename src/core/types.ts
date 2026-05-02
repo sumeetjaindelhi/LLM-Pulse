@@ -217,7 +217,6 @@ export interface ScanOptions {
   format: OutputFormat;
   category: ModelCategory | "all";
   top: number;
-  verbose: boolean;
   host?: string;
 }
 
@@ -270,6 +269,21 @@ export interface CheckOptions {
 }
 
 export type OffloadReason = "full_fit" | "partial_offload" | "too_small";
+
+export interface QuantAdviceOptions {
+  format: OutputFormat;
+  verbose: boolean;
+}
+
+// ── Compare Command ──────────────────────────
+
+export interface CompareOptions {
+  format: OutputFormat;
+  category: ModelCategory | "all";
+  top: number;
+  quant?: string;
+  host?: string;
+}
 
 // GPU layer-offload guidance for a specific model+quant+GPU combo.
 // `gpuLayers = "all"` means the full model fits on the GPU with headroom;

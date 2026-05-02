@@ -47,6 +47,21 @@ export function getAvailableVram(hardware: HardwareProfile): number {
   return hardware.memory.availableMb;
 }
 
+export function isFitting(level: FitLevel): boolean {
+  return level !== "cannot_run";
+}
+
+export function isComfortable(level: FitLevel): boolean {
+  return level === "excellent" || level === "comfortable";
+}
+
+// "Either can't run or will run painfully slow" — the threshold downstream
+// rendering uses for a failure tone, and `estimateSpeed` uses to short-circuit
+// to "slow".
+export function isCriticalFit(level: FitLevel): boolean {
+  return level === "cannot_run" || level === "barely";
+}
+
 export function classifyFit(availableVramMb: number, requiredVramMb: number): FitLevel {
   if (requiredVramMb <= 0) return "excellent";
   const ratio = availableVramMb / requiredVramMb;
@@ -81,9 +96,9 @@ function estimateSpeed(
   paramsBillion: number,
   hasGpu: boolean,
 ): "fast" | "moderate" | "slow" {
-  if (fitLevel === "cannot_run" || fitLevel === "barely") return "slow";
+  if (isCriticalFit(fitLevel)) return "slow";
   if (!hasGpu) return paramsBillion <= 3 ? "moderate" : "slow";
-  if (paramsBillion <= 7 && (fitLevel === "excellent" || fitLevel === "comfortable")) return "fast";
+  if (paramsBillion <= 7 && isComfortable(fitLevel)) return "fast";
   if (paramsBillion <= 14) return "moderate";
   return "slow";
 }
@@ -162,6 +177,31 @@ function estimateTotalLayers(paramsBillion: number): number {
 // Leave ~10% of VRAM for KV cache, attention workspace, and runtime overhead.
 // Without this a "perfect" weight-only fit OOMs the first time context grows.
 const OFFLOAD_KV_HEADROOM = 0.9;
+
+// Tolerance for treating two qualityRetention values as "tied" — anything
+// closer than 0.5% is noise from data-source rounding, not a real gap.
+const QUALITY_TIE_EPSILON = 0.005;
+
+// llama.cpp community heuristic — buy the most quality you can afford in VRAM,
+// since gains at the high end are real but diminishing. Falls back to the best
+// fitting quant when nothing is comfortable. Returns -1 when every quant
+// overflows the budget. Ties on retention break to higher bitsPerWeight so the
+// fuller-precision variant wins.
+export function pickSweetSpot(scores: ModelScore[]): number {
+  const fitting = scores.map((s, i) => ({ s, i })).filter((x) => isFitting(x.s.fitLevel));
+  if (fitting.length === 0) return -1;
+
+  const comfortable = fitting.filter((x) => isComfortable(x.s.fitLevel));
+  const pool = comfortable.length > 0 ? comfortable : fitting;
+  return pool.reduce((best, cur) => {
+    const delta = cur.s.quantization.qualityRetention - best.s.quantization.qualityRetention;
+    if (delta > QUALITY_TIE_EPSILON) return cur;
+    if (Math.abs(delta) <= QUALITY_TIE_EPSILON) {
+      return cur.s.quantization.bitsPerWeight > best.s.quantization.bitsPerWeight ? cur : best;
+    }
+    return best;
+  }).i;
+}
 
 export function suggestGpuOffload(
   model: ModelEntry,

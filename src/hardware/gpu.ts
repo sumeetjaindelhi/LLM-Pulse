@@ -68,8 +68,11 @@ export function parseRocmCsv(stdout: string): RocmGpuStats {
       const m = line.match(/([\d.]+)/);
       if (m) vramUsedMb = Math.round(parseFloat(m[1]) / (1024 * 1024));
     } else if (lower.includes("gpu use") || lower.includes("gpu utilization")) {
+      // ROCm 6.x emits floats here (e.g. "73.5"). parseInt would silently
+      // truncate the fraction; the JSON path uses parseFloat — keep them in
+      // sync so the same metric reports the same precision either way.
       const m = line.match(/([\d.]+)\s*%?/);
-      if (m) utilizationPercent = parseInt(m[1], 10);
+      if (m) utilizationPercent = Math.round(parseFloat(m[1]));
     } else if (lower.includes("temperature") || lower.includes("temp")) {
       const m = line.match(/([\d.]+)\s*c?/i);
       if (m) temperatureCelsius = parseFloat(m[1]);

@@ -10,8 +10,8 @@ let cacheValid = false;
 // `%ProgramFiles%\NVIDIA Corporation\NVSMI\`. Modern drivers (since ~2021)
 // moved it to `%SYSTEMROOT%\System32\`. A fresh install with PATH not yet
 // updated — or a custom install — leaves the binary invisible to execa's
-// PATH lookup. We probe both locations so those users still get detected.
-const WIN32_FALLBACK_PATHS = ["NVSMI", "System32"] as const;
+// PATH lookup. The actual probed paths are inlined in `resolveWindowsPath`
+// below to avoid a constant that nothing else reads.
 
 async function existsAt(path: string): Promise<boolean> {
   try {
@@ -85,7 +85,3 @@ export function _resetNvidiaSmiPathCache(): void {
   cached = null;
   cacheValid = false;
 }
-
-// Used by WIN32_FALLBACK_PATHS for log/debug paths — kept exported so the
-// list isn't silently dead when trimmed.
-export const _WIN32_FALLBACK_PATHS = WIN32_FALLBACK_PATHS;

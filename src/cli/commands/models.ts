@@ -3,10 +3,11 @@ import Table from "cli-table3";
 import { getAllModels, searchModels, filterByCategory } from "../../models/database.js";
 import { getMergedModels } from "../../models/merged-models.js";
 import { detectHardware } from "../../hardware/index.js";
-import { scoreModel } from "../../analysis/scorer.js";
+import { scoreModel, isFitting } from "../../analysis/scorer.js";
 import { theme } from "../ui/colors.js";
 import { fitBadge } from "../ui/badges.js";
 import { sectionHeader } from "../ui/boxes.js";
+import { borderlessTableChars } from "../ui/tables.js";
 import { toCsv } from "../ui/csv.js";
 import { resolveOllamaHost } from "../../core/config.js";
 import type { ModelEntry, ModelCategory, HardwareProfile, MergedModel } from "../../core/types.js";
@@ -32,13 +33,7 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
   let models: ModelEntry[];
 
   // Filter by search or category
-  if (options.search) {
-    models = searchModels(options.search);
-  } else if (options.category !== "all") {
-    models = filterByCategory(options.category);
-  } else {
-    models = getAllModels();
-  }
+  models = options.search ? searchModels(options.search) : filterByCategory(options.category);
 
   // If --fits, we need hardware info
   let hardware: HardwareProfile | null = null;
@@ -58,7 +53,7 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
       // Pick best fitting quantization
       const scores = model.quantizations
         .map((q) => scoreModel(model, q, hw, options.category))
-        .filter((s) => !options.fits || s.fitLevel !== "cannot_run")
+        .filter((s) => !options.fits || isFitting(s.fitLevel))
         .sort((a, b) => b.compositeScore - a.compositeScore);
 
       if (scores.length > 0) {
@@ -128,14 +123,7 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
       theme.muted("Categories"),
     ],
     style: { head: [], border: ["gray"], compact: true },
-    chars: {
-      top: "", "top-mid": "", "top-left": "", "top-right": "",
-      bottom: "", "bottom-mid": "", "bottom-left": "", "bottom-right": "",
-      left: "  ", "left-mid": "",
-      mid: "", "mid-mid": "",
-      right: "", "right-mid": "",
-      middle: "  ",
-    },
+    chars: borderlessTableChars,
   });
 
   for (const s of scored) {
@@ -288,14 +276,7 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
       theme.muted("Source"),
     ],
     style: { head: [], border: ["gray"], compact: true },
-    chars: {
-      top: "", "top-mid": "", "top-left": "", "top-right": "",
-      bottom: "", "bottom-mid": "", "bottom-left": "", "bottom-right": "",
-      left: "  ", "left-mid": "",
-      mid: "", "mid-mid": "",
-      right: "", "right-mid": "",
-      middle: "  ",
-    },
+    chars: borderlessTableChars,
   });
 
   for (const m of merged) {
@@ -319,7 +300,7 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
       const hw = hardware;
       const scores = entry.quantizations
         .map((q) => scoreModel(entry, q, hw, options.category))
-        .filter((s) => !options.fits || s.fitLevel !== "cannot_run")
+        .filter((s) => !options.fits || isFitting(s.fitLevel))
         .sort((a, b) => b.compositeScore - a.compositeScore);
       fitLabel = scores.length > 0 ? fitBadge(scores[0].fitLevel) : theme.fail("✗");
     } else if (!m.entry) {

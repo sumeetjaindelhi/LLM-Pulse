@@ -1,27 +1,20 @@
 import ora from "ora";
 import { detectHardware } from "../../hardware/index.js";
-import { scoreModel, getAvailableVram } from "../../analysis/scorer.js";
+import { scoreModel, getAvailableVram, isFitting } from "../../analysis/scorer.js";
 import { getRecommendations } from "../../analysis/recommender.js";
-import { resolveModel, searchModels } from "../../models/database.js";
+import { resolveModel } from "../../models/database.js";
 import { comparisonTable } from "../ui/tables.js";
 import { sectionHeader, titleBox } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
+import { renderModelNotFound } from "../ui/errors.js";
 import { toCsv } from "../ui/csv.js";
 import type {
   ModelEntry,
   ModelScore,
   ModelCategory,
   HardwareProfile,
-  OutputFormat,
+  CompareOptions,
 } from "../../core/types.js";
-
-export interface CompareOptions {
-  format: OutputFormat;
-  category: ModelCategory | "all";
-  top: number;
-  quant?: string;
-  host?: string;
-}
 
 function pickBestScore(
   model: ModelEntry,
@@ -44,14 +37,11 @@ function pickBestScore(
 }
 
 function findWinner(scores: ModelScore[]): number {
-  const runnable = scores.filter((s) => s.fitLevel !== "cannot_run");
-  if (runnable.length === 0) return -1;
-
   let bestIdx = -1;
   let bestScore = -1;
   let bestFit = -1;
   for (let i = 0; i < scores.length; i++) {
-    if (scores[i].fitLevel === "cannot_run") continue;
+    if (!isFitting(scores[i].fitLevel)) continue;
     const cs = scores[i].compositeScore;
     const fr = scores[i].fitRatio;
     if (cs > bestScore || (cs === bestScore && fr > bestFit)) {
@@ -119,14 +109,7 @@ function resolveExplicitModels(
     const model = resolveModel(arg);
     if (!model) {
       spinner?.stop();
-      console.log(`\n  ${theme.fail("✗")} Model not found: ${theme.value(arg)}`);
-      const suggestions = searchModels(arg).slice(0, 3);
-      if (suggestions.length > 0) {
-        console.log(`  ${theme.muted("Did you mean:")}`);
-        for (const s of suggestions) {
-          console.log(`    ${theme.muted("•")} ${s.name} ${theme.muted(`(${s.id})`)}`);
-        }
-      }
+      renderModelNotFound(arg, { suggestionsLimit: 3, identityFormat: "id", showBrowseHint: false });
       continue;
     }
 

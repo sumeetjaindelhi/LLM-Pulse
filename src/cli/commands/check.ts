@@ -1,12 +1,14 @@
 import ora from "ora";
 import Table from "cli-table3";
 import { detectHardware } from "../../hardware/index.js";
-import { scoreModel, deriveVerdict, getAvailableVram, suggestGpuOffload } from "../../analysis/scorer.js";
-import { resolveModel, searchModels } from "../../models/database.js";
+import { scoreModel, deriveVerdict, getAvailableVram, suggestGpuOffload, isFitting } from "../../analysis/scorer.js";
+import { resolveModel } from "../../models/database.js";
 import { titleBox, sectionHeader, keyValue, subLine } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
 import { fitBadge } from "../ui/badges.js";
 import { formatMb } from "../ui/progress.js";
+import { borderlessTableChars, speedLabel } from "../ui/tables.js";
+import { renderModelNotFound } from "../ui/errors.js";
 import { toCsv } from "../ui/csv.js";
 import type {
   ModelEntry,
@@ -36,12 +38,7 @@ function verdictLine(verdict: Verdict, modelName: string): string {
 
 function quantTable(scores: ModelScore[], bestIdx: number, availableVramMb: number): string {
   const table = new Table({
-    chars: {
-      top: "", "top-mid": "", "top-left": "", "top-right": "",
-      bottom: "", "bottom-mid": "", "bottom-left": "", "bottom-right": "",
-      left: "  ", "left-mid": "", mid: "", "mid-mid": "",
-      right: "", "right-mid": "", middle: "  ",
-    },
+    chars: borderlessTableChars,
     style: { "padding-left": 0, "padding-right": 0, head: ["gray"] },
   });
 
@@ -50,18 +47,18 @@ function quantTable(scores: ModelScore[], bestIdx: number, availableVramMb: numb
   for (let i = 0; i < scores.length; i++) {
     const s = scores[i];
     const marker = i === bestIdx ? theme.pass("★ ") : "  ";
-    const quantName = `${marker}${s.quantization.name}`;
-    const vramNeeded = formatMb(s.quantization.vramMb);
-    const vramAvail = formatMb(availableVramMb);
-    const fit = fitBadge(s.fitLevel);
-    const speed = s.speedEstimate === "fast" ? theme.pass(s.speedEstimate)
-      : s.speedEstimate === "moderate" ? theme.warning(s.speedEstimate)
-      : theme.fail(s.speedEstimate);
-    const score = s.fitLevel === "cannot_run"
-      ? theme.fail("—")
-      : theme.number(String(s.compositeScore));
+    const score = isFitting(s.fitLevel)
+      ? theme.number(String(s.compositeScore))
+      : theme.fail("—");
 
-    table.push([quantName, vramNeeded, vramAvail, fit, speed, score]);
+    table.push([
+      `${marker}${s.quantization.name}`,
+      formatMb(s.quantization.vramMb),
+      formatMb(availableVramMb),
+      fitBadge(s.fitLevel),
+      speedLabel(s.speedEstimate),
+      score,
+    ]);
   }
 
   return table.toString();
@@ -84,25 +81,7 @@ export async function checkCommand(
   const model = resolveModel(modelArg);
 
   if (!model) {
-    const suggestions = searchModels(modelArg).slice(0, 5);
-    if (silent) {
-      console.log(JSON.stringify({
-        error: "Model not found",
-        query: modelArg,
-        suggestions: suggestions.map((s) => ({ id: s.id, name: s.name, ollamaTag: s.ollamaTag })),
-      }, null, 2));
-      return;
-    }
-
-    console.log(`\n  ${theme.fail("✗")} Model not found: ${theme.value(modelArg)}`);
-    if (suggestions.length > 0) {
-      console.log(`  ${theme.muted("Did you mean:")}`);
-      for (const s of suggestions) {
-        const tag = s.ollamaTag ? theme.muted(` (${s.ollamaTag})`) : "";
-        console.log(`    ${theme.muted("•")} ${s.name}${tag}`);
-      }
-    }
-    console.log(`  ${theme.muted("Browse all models:")} ${theme.command("llm-pulse models")}`);
+    renderModelNotFound(modelArg, { silent });
     return;
   }
 

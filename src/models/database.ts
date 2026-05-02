@@ -94,7 +94,8 @@ export function searchModels(query: string): ModelEntry[] {
   );
 }
 
-export function filterByCategory(category: ModelCategory): ModelEntry[] {
+export function filterByCategory(category: ModelCategory | "all"): ModelEntry[] {
+  if (category === "all") return loadModels();
   return loadModels().filter((m) => m.categories.includes(category));
 }
 
