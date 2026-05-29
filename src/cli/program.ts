@@ -8,9 +8,10 @@ import { benchmarkCommand } from "./commands/benchmark.js";
 import { compareCommand } from "./commands/compare.js";
 import { checkCommand } from "./commands/check.js";
 import { quantAdviceCommand } from "./commands/quant-advice.js";
+import { optimizeCommand } from "./commands/optimize.js";
 import { profileCommand } from "./commands/profile.js";
 import { parseIntSafe } from "./utils/parse-int-safe.js";
-import type { ScanOptions, ModelCategory, OutputFormat, CheckOptions, QuantAdviceOptions } from "../core/types.js";
+import type { ScanOptions, ModelCategory, OutputFormat, CheckOptions, QuantAdviceOptions, OptimizeOptions } from "../core/types.js";
 
 export function createProgram(): Command {
   const config = loadConfig();
@@ -151,6 +152,22 @@ export function createProgram(): Command {
         verbose: opts.verbose,
       };
       await quantAdviceCommand(model, options);
+    });
+
+  // Optimize command — recommend tuned Ollama runtime parameters for a model.
+  program
+    .command("optimize <model>")
+    .description("Recommend tuned Ollama runtime parameters (num_ctx, num_gpu, num_thread, num_batch) for your hardware")
+    .option("-q, --quant <name>", "Pin a specific quantization instead of the sweet-spot pick")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .option("-v, --verbose", "Show extra details", false)
+    .action(async (model: string, opts) => {
+      const options: OptimizeOptions = {
+        quant: opts.quant,
+        format: opts.format as OutputFormat,
+        verbose: opts.verbose,
+      };
+      await optimizeCommand(model, options);
     });
 
   // Monitor command

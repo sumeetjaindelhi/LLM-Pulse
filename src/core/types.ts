@@ -275,6 +275,12 @@ export interface QuantAdviceOptions {
   verbose: boolean;
 }
 
+export interface OptimizeOptions {
+  quant?: string; // pin a specific quantization instead of auto-picking the sweet spot
+  format: OutputFormat;
+  verbose: boolean;
+}
+
 // ── Compare Command ──────────────────────────
 
 export interface CompareOptions {
@@ -297,4 +303,29 @@ export interface GpuOffloadSuggestion {
   estimatedVramUsedMb: number;
   reason: OffloadReason;
   ollamaCommand: string | null;
+}
+
+// ── Optimize Command ─────────────────────────
+
+// One tuned Ollama runtime parameter plus a short, human-readable reason.
+// `value` is a plain number for num_ctx / num_thread / num_batch; num_gpu uses
+// the string "all" when the whole model fits on the GPU (Ollama offloads every
+// layer by default in that case).
+export interface OptimizedParameter {
+  value: number | "all";
+  note: string;
+}
+
+// A complete set of recommended Ollama runtime parameters for one model+quant on
+// the detected hardware. `numGpu` is null on unified-memory systems (Apple
+// Silicon): the CPU/GPU layer split isn't meaningful there, so the parameter is
+// omitted from the generated Modelfile rather than guessed.
+export interface OptimizationProfile {
+  quant: QuantizationVariant;
+  quantForced: boolean; // true when the user pinned --quant rather than auto-picking
+  fitLevel: FitLevel;
+  numCtx: OptimizedParameter;
+  numGpu: OptimizedParameter | null;
+  numThread: OptimizedParameter;
+  numBatch: OptimizedParameter;
 }

@@ -66,6 +66,18 @@ llm-pulse quant-advice qwen2.5-coder:14b --format json
 
 Each row gets a note: "Sweet spot — best quality you can fit", "Smaller — faster, slight quality drop", "Overkill — negligible quality gain", "Too big — overflows VRAM", etc. The recommendation follows the llama.cpp community heuristic: buy the most quality you can afford in VRAM, since gains at the high end are real but diminishing.
 
+### `llm-pulse optimize <model>`
+
+Recommends tuned Ollama runtime parameters — `num_ctx`, `num_gpu`, `num_thread`, `num_batch` — for the sweet-spot quantization on your hardware, as a paste-ready Modelfile plus interactive `/set parameter` lines.
+
+```bash
+llm-pulse optimize llama3.1:8b                  # Balanced tuned profile + Modelfile
+llm-pulse optimize llama3.1:8b --quant Q4_K_M   # Pin a specific quantization
+llm-pulse optimize llama3.1:8b --format json
+```
+
+`num_thread` uses your physical performance cores (skipping efficiency cores and SMT); `num_ctx` is the largest context whose KV cache fits alongside the weights — conservative, so it won't suggest a size that risks OOM; `num_gpu` reuses the layer-offload math (omitted on Apple Silicon, where Ollama offloads all layers); `num_batch` drops to 256 on tight fits to ease the prompt-eval VRAM spike.
+
 ### `llm-pulse doctor`
 
 System health check — scores your setup and gives suggestions.
