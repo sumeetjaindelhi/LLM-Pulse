@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { runDiagnostics } from "../../src/analysis/doctor.js";
-import type { HardwareProfile, RuntimeInfo } from "../../src/core/types.js";
+import { runDiagnostics, planFixes } from "../../src/analysis/doctor.js";
+import type { FixAction, HardwareProfile, RuntimeInfo } from "../../src/core/types.js";
 import highEnd from "../fixtures/hardware-profiles/high-end-nvidia.json";
 import cpuOnly from "../fixtures/hardware-profiles/cpu-only.json";
 import appleM2 from "../fixtures/hardware-profiles/apple-m2.json";
@@ -121,5 +121,53 @@ describe("runDiagnostics", () => {
     expect(report1.score).toBeLessThanOrEqual(100);
     expect(report2.score).toBeGreaterThanOrEqual(0);
     expect(report2.score).toBeLessThanOrEqual(100);
+  });
+});
+
+describe("planFixes", () => {
+  it("marks allowlisted fixes as would-run and carries display fields through", () => {
+    const plan = planFixes([
+      {
+        label: "Pull a starter model",
+        command: "ollama pull llama3.2:3b",
+        argv: ["ollama", "pull", "llama3.2:3b"],
+        description: "Downloads Llama 3.2 3B (~2 GB) — a great starter model",
+      },
+    ]);
+    expect(plan).toHaveLength(1);
+    expect(plan[0].status).toBe("would-run");
+    expect(plan[0].label).toBe("Pull a starter model");
+    expect(plan[0].command).toBe("ollama pull llama3.2:3b");
+    expect(plan[0].description).toContain("Llama 3.2 3B");
+  });
+
+  it("marks fixes whose binary is not allowlisted as blocked", () => {
+    const plan = planFixes([
+      {
+        label: "Sketchy",
+        command: "evil --pwn",
+        argv: ["evil", "--pwn"],
+        description: "Should never run",
+      },
+    ]);
+    expect(plan[0].status).toBe("blocked");
+  });
+
+  it("marks fixes with a missing or empty argv as malformed", () => {
+    const noArgv = { label: "No argv", command: "x", description: "d" };
+    const emptyArgv = { label: "Empty argv", command: "x", argv: [], description: "d" };
+    const plan = planFixes([noArgv as FixAction, emptyArgv as FixAction]);
+    expect(plan[0].status).toBe("malformed");
+    expect(plan[1].status).toBe("malformed");
+  });
+
+  it("accepts every fix that runDiagnostics itself emits", () => {
+    // The fixes shipped in diagnostics must always clear the runner allowlist —
+    // a blocked/malformed entry here means the two halves drifted apart.
+    const report = runDiagnostics(cpuOnly as HardwareProfile, noRuntimes);
+    const fixes = report.checks.flatMap((c) => (c.fix ? [c.fix] : []));
+    expect(fixes.length).toBeGreaterThan(0);
+    const plan = planFixes(fixes);
+    expect(plan.every((p) => p.status === "would-run")).toBe(true);
   });
 });

@@ -2,15 +2,15 @@ import ora from "ora";
 import { execa } from "execa";
 import { detectHardware } from "../../hardware/index.js";
 import { detectAllRuntimes } from "../../runtimes/index.js";
-import { runDiagnostics } from "../../analysis/doctor.js";
+import { runDiagnostics, planFixes } from "../../analysis/doctor.js";
 import { theme } from "../ui/colors.js";
 import { severityIcon } from "../ui/badges.js";
 import { sectionHeader } from "../ui/boxes.js";
 import { toCsv } from "../ui/csv.js";
 import { resolveOllamaHost } from "../../core/config.js";
-import type { FixAction } from "../../core/types.js";
+import type { FixAction, FixPlanEntry } from "../../core/types.js";
 
-export async function doctorCommand(options: { format?: string; host?: string; fix?: boolean }): Promise<void> {
+export async function doctorCommand(options: { format?: string; host?: string; fix?: boolean; dryRun?: boolean }): Promise<void> {
   const ollamaHost = resolveOllamaHost(options.host);
   const spinner = ora({ text: "Running diagnostics...", color: "cyan" }).start();
 
@@ -22,15 +22,19 @@ export async function doctorCommand(options: { format?: string; host?: string; f
   const report = runDiagnostics(hardware, runtimes);
   spinner.succeed("Diagnostics complete");
 
-  if (options.format === "json") {
-    console.log(JSON.stringify(report, null, 2));
-    return;
-  }
-
-  if (options.format === "csv") {
-    const headers = ["label", "severity", "message", "suggestion"];
-    const rows = report.checks.map((c) => [c.label, c.severity, c.message, c.suggestion ?? ""]);
-    console.log(toCsv(headers, rows));
+  if (options.format === "json" || options.format === "csv") {
+    // Fixes only run in table mode. Say so on stderr (stdout stays parseable)
+    // instead of silently dropping a flag the user explicitly passed.
+    if (options.fix || options.dryRun) {
+      process.stderr.write("Note: --fix/--dry-run apply to table output only — ignored with --format json/csv.\n");
+    }
+    if (options.format === "json") {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      const headers = ["label", "severity", "message", "suggestion"];
+      const rows = report.checks.map((c) => [c.label, c.severity, c.message, c.suggestion ?? ""]);
+      console.log(toCsv(headers, rows));
+    }
     return;
   }
 
@@ -38,6 +42,7 @@ export async function doctorCommand(options: { format?: string; host?: string; f
   console.log();
 
   const fixable: FixAction[] = [];
+  const applyMode = options.fix && !options.dryRun;
 
   for (const check of report.checks) {
     const icon = severityIcon(check.severity);
@@ -47,7 +52,7 @@ export async function doctorCommand(options: { format?: string; host?: string; f
     }
     if (check.fix) {
       fixable.push(check.fix);
-      if (!options.fix) {
+      if (!applyMode) {
         console.log(`    ${theme.command(`⚡ Auto-fix available: ${check.fix.label}`)}`);
       }
     }
@@ -75,52 +80,65 @@ export async function doctorCommand(options: { format?: string; host?: string; f
     console.log(`  Get started: ${theme.command("https://ollama.com")}`);
   }
 
-  // Auto-fix mode
-  if (options.fix && fixable.length > 0) {
+  // Dry-run mode: show exactly what --fix would execute, touch nothing.
+  if (options.dryRun && fixable.length > 0) {
+    console.log();
+    console.log(sectionHeader("Dry Run — Planned Fixes"));
+    console.log();
+    renderFixPlan(planFixes(fixable));
+    console.log();
+    console.log(`  ${theme.muted("No changes made. Run")} ${theme.command("llm-pulse doctor --fix")} ${theme.muted("to apply.")}`);
+  } else if (options.dryRun) {
+    console.log();
+    console.log(`  ${theme.muted("Dry run: no auto-fixable issues detected — nothing would change.")}`);
+  } else if (options.fix && fixable.length > 0) {
     console.log();
     console.log(sectionHeader("Running Auto-Fixes"));
     console.log();
     await runFixes(fixable);
   } else if (!options.fix && fixable.length > 0) {
     console.log();
-    console.log(`  ${theme.muted(`${fixable.length} auto-fix(es) available. Run with`)} ${theme.command("llm-pulse doctor --fix")} ${theme.muted("to apply.")}`);
+    console.log(`  ${theme.muted(`${fixable.length} auto-fix(es) available. Run with`)} ${theme.command("llm-pulse doctor --fix")} ${theme.muted("to apply,")} ${theme.command("--fix --dry-run")} ${theme.muted("to preview.")}`);
   }
 
   console.log();
 }
 
-// Defense-in-depth: even though every FixAction literal today is a hardcoded
-// constant in src/analysis/doctor.ts, the TS type system can't enforce that
-// across future refactors. If FixAction ever gets populated from config or an
-// API, this allowlist blocks arbitrary command execution at the exec boundary.
-const ALLOWED_FIX_BINARIES = new Set([
-  "ollama",
-  "brew",
-  "winget",
-  "sudo",
-  "apt",
-  "sh",
-]);
+function renderFixPlan(plan: FixPlanEntry[]): void {
+  for (const entry of plan) {
+    if (entry.status === "would-run") {
+      console.log(`  ${theme.pass("✓")} ${entry.label} — ${entry.description}`);
+      console.log(`    ${theme.command(`$ ${entry.command}`)}`);
+    } else if (entry.status === "blocked") {
+      console.log(`  ${theme.fail("✗")} ${entry.label} — would be blocked (binary not in fix-runner allowlist)`);
+    } else {
+      console.log(`  ${theme.fail("✗")} ${entry.label} — malformed fix (no argv), would be skipped`);
+    }
+  }
+}
 
 async function runFixes(fixes: FixAction[]): Promise<void> {
-  for (const fix of fixes) {
+  const plan = planFixes(fixes);
+
+  for (let i = 0; i < fixes.length; i++) {
+    const fix = fixes[i];
     const spinner = ora({ text: `${fix.label}: ${fix.description}`, color: "cyan" }).start();
 
     try {
-      // Use the structured argv, not a naive split of `fix.command`. The
-      // display-only `command` string may contain shell pipes (e.g. the Linux
-      // curl | sh installer) that would break if split by spaces.
-      if (!fix.argv || fix.argv.length === 0) {
+      // Gate on the shared plan verdict so execution can never diverge from
+      // what --dry-run previewed. argv is the structured form — the display
+      // `command` string may contain shell pipes that a naive split would break.
+      if (plan[i].status === "malformed") {
         spinner.fail(`${fix.label}: Failed — malformed fix (no argv)`);
         continue;
       }
-      const cmd = fix.argv[0];
-      if (!ALLOWED_FIX_BINARIES.has(cmd)) {
+      if (plan[i].status === "blocked") {
         spinner.fail(
-          `${fix.label}: Blocked — "${cmd}" is not in the fix-runner allowlist`,
+          `${fix.label}: Blocked — "${fix.argv[0]}" is not in the fix-runner allowlist`,
         );
         continue;
       }
+      const cmd = fix.argv[0];
       const args = fix.argv.slice(1);
 
       // For background services like `ollama serve`, spawn detached and verify.

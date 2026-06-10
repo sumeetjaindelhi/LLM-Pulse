@@ -1,3 +1,5 @@
+# package-lock.json is intentionally tracked: it pins the dependency tree so
+# `npm ci` is reproducible and `npm audit fix` results persist in the repo.
 node_modules/
 dist/
 *.tsbuildinfo
@@ -5,7 +7,6 @@ dist/
 Thumbs.db
 .env
 *.log
-package-lock.json
 ARCHITECTURE.md
 CLAUDE.md
 *.md

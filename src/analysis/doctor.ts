@@ -5,7 +5,39 @@ import type {
   DiagnosticCheck,
   HealthReport,
   FixAction,
+  FixPlanEntry,
 } from "../core/types.js";
+
+// Defense-in-depth: every FixAction literal today is a hardcoded constant in
+// this file, but the type system can't enforce that across future refactors.
+// If FixAction ever gets populated from config or an API, this allowlist
+// blocks arbitrary command execution at the exec boundary. Lives here (not in
+// the CLI runner) so `planFixes` previews and `--fix` execution share one gate.
+const ALLOWED_FIX_BINARIES = new Set([
+  "ollama",
+  "brew",
+  "winget",
+  "sudo",
+  "apt",
+  "sh",
+]);
+
+/** Classify each fix exactly the way the `--fix` runner will treat it, without
+ *  executing anything. This is what `--dry-run` renders — and because the
+ *  runner consumes the same plan, the preview can never drift from reality. */
+export function planFixes(fixes: FixAction[]): FixPlanEntry[] {
+  return fixes.map((fix) => {
+    let status: FixPlanEntry["status"];
+    if (!fix.argv || fix.argv.length === 0) {
+      status = "malformed";
+    } else if (!ALLOWED_FIX_BINARIES.has(fix.argv[0])) {
+      status = "blocked";
+    } else {
+      status = "would-run";
+    }
+    return { label: fix.label, command: fix.command, description: fix.description, status };
+  });
+}
 
 export function runDiagnostics(
   hardware: HardwareProfile,

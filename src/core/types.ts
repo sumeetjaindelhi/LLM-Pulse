@@ -151,8 +151,17 @@ export interface FixAction {
   label: string; // e.g. "Start Ollama"
   command: string; // display-only, shown to the user (e.g. "curl -fsSL ... | sh")
   argv: string[]; // actual argv passed to execa; argv[0] is the binary
-  useShell?: boolean; // true when the command needs shell features (pipes/redirects)
   description: string; // what the fix does
+}
+
+/** Verdict for one FixAction from `planFixes` — what `--fix` would do with it.
+ *  "would-run" passes the runner's binary allowlist; "blocked" fails it;
+ *  "malformed" has no argv to execute. */
+export interface FixPlanEntry {
+  label: string;
+  command: string;
+  description: string;
+  status: "would-run" | "blocked" | "malformed";
 }
 
 export interface DiagnosticCheck {

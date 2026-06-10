@@ -36,10 +36,10 @@ llm-pulse --category coding --top 3  # Top 3 coding models
 
 | Flag | Description | Default |
 |---|---|---|
-| `-f, --format` | `table` or `json` | `table` |
+| `-f, --format` | `table`, `json`, or `csv` | `table` |
 | `-c, --category` | `general`, `coding`, `reasoning`, `creative`, `multilingual` | `all` |
 | `-t, --top <n>` | Number of recommendations | `5` |
-| `-v, --verbose` | Detailed output | `false` |
+| `-H, --host <url>` | Ollama API host URL | `http://127.0.0.1:11434` |
 
 ### `llm-pulse check <model>`
 
@@ -53,6 +53,16 @@ llm-pulse check llama3.1:70b --format json
 ```
 
 When a model overflows your VRAM, the `GPU Layer Offload` section tells you how many transformer blocks to put on the GPU (maps to Ollama `num_gpu` / llama.cpp `--n-gpu-layers`) with the rest on CPU — e.g. "Put 44 of 80 layers on GPU (~22 GB), rest on CPU". Hidden on Apple Silicon (unified memory) and CPU-only systems.
+
+### `llm-pulse compare [models...]`
+
+Compare models side-by-side against your hardware — fit level, VRAM needed, and speed estimate per model.
+
+```bash
+llm-pulse compare llama3.1:8b phi3 qwen2.5-coder:14b
+llm-pulse compare --category coding --top 3    # Auto-pick top 3 coding models
+llm-pulse compare llama3.1:8b phi3 --quant Q4_K_M
+```
 
 ### `llm-pulse quant-advice <model>`
 
@@ -85,8 +95,11 @@ System health check — scores your setup and gives suggestions.
 ```bash
 llm-pulse doctor
 llm-pulse doctor --format json
+llm-pulse doctor --fix --dry-run    # Preview the exact commands --fix would run
 llm-pulse doctor --fix              # Auto-fix detected issues
 ```
+
+`--dry-run` prints each planned fix with the exact command (e.g. `$ brew install ollama`) and changes nothing — review first, then run `--fix` to apply.
 
 ### `llm-pulse models`
 
@@ -124,6 +137,17 @@ llm-pulse benchmark --model phi3     # Specific model
 llm-pulse benchmark --rounds 5       # 5 rounds (default: 3)
 ```
 
+### `llm-pulse profile`
+
+Run inference with hardware profiling — latency breakdown (TTFT, generation), plus a VRAM and GPU-utilization timeline sampled during the run.
+
+```bash
+llm-pulse profile                          # Short/medium/long prompt set
+llm-pulse profile --model phi3             # Specific model
+llm-pulse profile --prompt "Explain DNS"   # Custom prompt
+llm-pulse profile --context-size 4096
+```
+
 ## Programmatic API
 
 ```typescript
@@ -148,11 +172,13 @@ Add to your Claude Code config (`~/.claude.json` or your project's `.mcp.json`):
   "mcpServers": {
     "llm-pulse": {
       "command": "npx",
-      "args": ["-y", "llm-pulse-mcp"]
+      "args": ["-y", "-p", "llm-pulse", "llm-pulse-mcp"]
     }
   }
 }
 ```
+
+(`llm-pulse-mcp` is a binary inside the `llm-pulse` package, so npx needs `-p llm-pulse`. If you've installed globally with `npm install -g llm-pulse`, you can use `"command": "llm-pulse-mcp"` with no args instead.)
 
 Exposed tools:
 

@@ -71,9 +71,10 @@ export function createProgram(): Command {
     .description("System health check with actionable advice")
     .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
     .option("--fix", "Automatically apply available fixes", false)
+    .option("--dry-run", "Preview the exact commands --fix would run, without executing them", false)
     .option("-H, --host <url>", "Ollama API host URL")
     .action(async (opts) => {
-      await doctorCommand({ format: opts.format, fix: opts.fix, host: opts.host });
+      await doctorCommand({ format: opts.format, fix: opts.fix, dryRun: opts.dryRun, host: opts.host });
     });
 
   // Models command
