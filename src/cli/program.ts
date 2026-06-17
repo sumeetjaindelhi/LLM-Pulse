@@ -9,9 +9,10 @@ import { compareCommand } from "./commands/compare.js";
 import { checkCommand } from "./commands/check.js";
 import { quantAdviceCommand } from "./commands/quant-advice.js";
 import { optimizeCommand } from "./commands/optimize.js";
+import { contextFitCommand } from "./commands/context-fit.js";
 import { profileCommand } from "./commands/profile.js";
 import { parseIntSafe } from "./utils/parse-int-safe.js";
-import type { ScanOptions, ModelCategory, OutputFormat, CheckOptions, QuantAdviceOptions, OptimizeOptions } from "../core/types.js";
+import type { ScanOptions, ModelCategory, OutputFormat, CheckOptions, QuantAdviceOptions, OptimizeOptions, ContextFitOptions } from "../core/types.js";
 
 export function createProgram(): Command {
   const config = loadConfig();
@@ -169,6 +170,24 @@ export function createProgram(): Command {
         verbose: opts.verbose,
       };
       await optimizeCommand(model, options);
+    });
+
+  // Context-fit command — will a prompt of N tokens fit on this hardware?
+  program
+    .command("context-fit <model>")
+    .description("Check whether a prompt of N tokens fits a model's context on your hardware (native window + hardware-afforded KV cache)")
+    .requiredOption("--prompt-tokens <n>", "Number of prompt/input tokens to check")
+    .option("--response-tokens <n>", "Tokens to reserve for the model's response", "512")
+    .option("-q, --quant <name>", "Pin a specific quantization instead of the sweet-spot pick")
+    .option("-f, --format <format>", "Output format (table, json, csv)", defaultFormat)
+    .action(async (model: string, opts) => {
+      const options: ContextFitOptions = {
+        promptTokens: parseIntSafe(opts.promptTokens, 0, "prompt-tokens"),
+        responseTokens: parseIntSafe(opts.responseTokens, 512, "response-tokens"),
+        quant: opts.quant,
+        format: opts.format as OutputFormat,
+      };
+      await contextFitCommand(model, options);
     });
 
   // Monitor command
