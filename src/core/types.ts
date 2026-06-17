@@ -338,3 +338,45 @@ export interface OptimizationProfile {
   numThread: OptimizedParameter;
   numBatch: OptimizedParameter;
 }
+
+// ── Context-Fit Command ──────────────────────
+
+// Input to checkContextFit. responseTokens defaults to 512 when omitted; quant
+// is the already-resolved variant (the sweet-spot pick when the caller didn't
+// force one).
+export interface ContextFitInput {
+  promptTokens: number;
+  responseTokens?: number;
+  quant?: QuantizationVariant;
+}
+
+// CLI-layer options (quant is the raw string the user typed, resolved in the
+// command shell).
+export interface ContextFitOptions {
+  promptTokens: number;
+  responseTokens?: number;
+  quant?: string;
+  format: OutputFormat;
+}
+
+// Whether a workload fits a model's context on this hardware. `nativeWindow` is
+// the model's architectural limit; `affordedByVramTokens` is the largest KV
+// cache that fits beside the weights for `quant`; `effectiveMaxTokens` is the
+// binding minimum of the two. `limitedBy` names which ceiling binds — the field
+// that tells a caller whether to switch models ("model") or switch quant / trim
+// ("hardware").
+export interface ContextFitResult {
+  model: { id: string; name: string; parametersBillion: number; contextWindow: number };
+  quant: { name: string; vramMb: number };
+  quantForced: boolean;
+  promptTokens: number;
+  responseTokens: number;
+  neededTokens: number;
+  nativeWindow: number;
+  affordedByVramTokens: number;
+  effectiveMaxTokens: number;
+  limitedBy: "model" | "hardware";
+  verdict: "yes" | "tight" | "no";
+  headroomTokens: number;
+  remedy: string | null;
+}
