@@ -88,6 +88,16 @@ llm-pulse optimize llama3.1:8b --format json
 
 `num_thread` uses your physical performance cores (skipping efficiency cores and SMT); `num_ctx` is the largest context whose KV cache fits alongside the weights — conservative, so it won't suggest a size that risks OOM; `num_gpu` reuses the layer-offload math (omitted on Apple Silicon, where Ollama offloads all layers); `num_batch` drops to 256 on tight fits to ease the prompt-eval VRAM spike.
 
+### `llm-pulse context-fit <model>`
+
+"Will this prompt fit in the context window?" — answers using the smaller of the model's native context window and the KV-cache ceiling your hardware can sustain. Returns a `yes` / `tight` / `no` verdict, which ceiling is binding (`model` vs `hardware`), and a remedy when it doesn't fit (smaller quant that does, or trim/offload suggestion).
+
+```bash
+llm-pulse context-fit llama3.1:8b --prompt-tokens 50000                          # will this prompt fit in context?
+llm-pulse context-fit llama3.1:8b --prompt-tokens 50000 --response-tokens 1024   # reserve room to generate
+llm-pulse context-fit llama3.1:8b --prompt-tokens 50000 --format json
+```
+
 ### `llm-pulse doctor`
 
 System health check — scores your setup and gives suggestions.
@@ -190,6 +200,7 @@ Exposed tools:
 | `doctor` | System health score with actionable suggestions |
 | `models` | Browse / search the model database, optionally filtered to models that fit |
 | `monitor` | One-shot live snapshot — CPU/GPU%, VRAM, temp, power, active Ollama model + tok/s |
+| `context-fit-check` | "Will a prompt of N tokens fit?" — verdict (yes/tight/no), which ceiling is binding (model vs hardware), and a remedy |
 
 ## Supported
 
