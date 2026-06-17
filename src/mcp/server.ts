@@ -7,13 +7,14 @@ import { detectAllRuntimes } from "../runtimes/index.js";
 import { getAllModels, searchModels, filterByCategory, resolveModel } from "../models/database.js";
 import { modelNotFoundPayload } from "../cli/ui/errors.js";
 import { fetchOllamaModels, clearOllamaCache } from "../models/ollama-models.js";
+import { checkContextFit } from "../analysis/context-fit.js";
 import { getRecommendations } from "../analysis/recommender.js";
 import { scoreModel, deriveVerdict, getAvailableVram, isFitting } from "../analysis/scorer.js";
 import { runDiagnostics } from "../analysis/doctor.js";
 import { resolveOllamaHost } from "../core/config.js";
 import { VERSION } from "../core/constants.js";
 import { LocalhostUrl } from "../core/api-schemas.js";
-import type { ModelCategory } from "../core/types.js";
+import type { ModelCategory, QuantizationVariant } from "../core/types.js";
 
 const CategoryEnum = z.enum(["general", "coding", "reasoning", "creative", "multilingual", "all"]);
 
@@ -180,6 +181,61 @@ server.tool(
         pullCommand,
       };
 
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],
+      };
+    }
+  },
+);
+
+// ── context-fit-check ────────────────────────────────
+server.tool(
+  "context-fit-check",
+  "Check whether a prompt of N tokens fits a model's context on your hardware. Combines the model's native context window with the hardware-afforded max (the KV cache that fits beside the weights in VRAM) and returns a verdict, headroom, and a remedy when it won't fit.",
+  {
+    model: z.string().describe("Model name, ID, or Ollama tag (e.g. 'llama3.1:8b')"),
+    promptTokens: z.number().int().min(0).describe("Number of prompt/input tokens to check"),
+    responseTokens: z.number().int().min(0).optional().default(512).describe("Tokens to reserve for the model's response (default 512)"),
+    quant: z.string().optional().describe("Specific quantization (e.g. 'Q4_K_M'); defaults to the sweet-spot pick"),
+  },
+  async ({ model: modelArg, promptTokens, responseTokens, quant }) => {
+    try {
+      const hardware = await detectHardware();
+      const model = resolveModel(modelArg);
+
+      if (!model) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: JSON.stringify(modelNotFoundPayload(modelArg), null, 2) }],
+        };
+      }
+
+      let forcedQuant: QuantizationVariant | undefined;
+      if (quant) {
+        const match = model.quantizations.find((q) => q.name.toLowerCase() === quant.toLowerCase());
+        if (!match) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: JSON.stringify({
+              error: `Quantization "${quant}" not found for model ${model.name}`,
+              availableQuantizations: model.quantizations.map((q) => q.name),
+            }, null, 2) }],
+          };
+        }
+        forcedQuant = match;
+      }
+
+      if (model.quantizations.length === 0) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: JSON.stringify({ error: `Model ${model.name} has no quantizations defined in the database` }, null, 2) }],
+        };
+      }
+
+      const result = checkContextFit(model, hardware, { promptTokens, responseTokens, quant: forcedQuant });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
       return {
