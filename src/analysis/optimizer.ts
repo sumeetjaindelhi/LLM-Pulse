@@ -6,6 +6,7 @@ import {
   isComfortable,
   suggestGpuOffload,
 } from "./scorer.js";
+import { maxContextTokensForVram } from "./context-capacity.js";
 import type {
   CpuInfo,
   FitLevel,
@@ -25,35 +26,11 @@ export const CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768, 65536, 131072] as 
 const MIN_CONTEXT = CONTEXT_TIERS[0];
 const MAX_CONTEXT = CONTEXT_TIERS[CONTEXT_TIERS.length - 1];
 
-// VRAM/RAM reserve for the inference compute buffer, allocator slack, and
-// fragmentation — memory that lives alongside weights + KV cache. A fraction of
-// the pool is used when that's larger, so big rigs reserve proportionally more.
-const CONTEXT_COMPUTE_RESERVE_MB = 768;
-const CONTEXT_RESERVE_FRACTION = 0.05;
-
 // Ollama's default num_batch is 512 (prompt tokens processed per step). A larger
 // batch speeds prompt eval but spikes VRAM; on tight fits we halve it so the
 // spike doesn't tip the model into OOM.
 const DEFAULT_BATCH = 512;
 const TIGHT_BATCH = 256;
-
-// Estimated KV-cache size in MB per 1,000 tokens of context, keyed by parameter
-// count. A precise figure needs the model's n_kv_heads x head_dim and whether it
-// uses grouped-query attention — neither is in the curated DB, which carries only
-// parametersBillion. These values assume modern GQA-era architectures with an
-// fp16 KV cache (Ollama's default) and are set deliberately high: over-estimating
-// KV makes num_ctx err toward "safe" rather than "OOM", which is what we want.
-// Same param-bucket shape as scorer.ts's estimateTotalLayers.
-function kvCacheMbPer1kTokens(paramsBillion: number): number {
-  if (paramsBillion <= 1.5) return 40;
-  if (paramsBillion <= 4) return 80;
-  if (paramsBillion <= 9) return 150;
-  if (paramsBillion <= 15) return 210;
-  if (paramsBillion <= 22) return 280;
-  if (paramsBillion <= 35) return 360;
-  if (paramsBillion <= 80) return 440;
-  return 600;
-}
 
 // num_thread — physical performance cores. llama.cpp throughput peaks there:
 // logical SMT threads add contention rather than speed, and efficiency cores drag
@@ -84,14 +61,9 @@ export function recommendContext(
   quant: QuantizationVariant,
   hardware: HardwareProfile,
 ): OptimizedParameter {
-  // getAvailableVram returns the right pool for the system: discrete VRAM, the
-  // unified-memory cap on Apple Silicon, or system RAM on a CPU-only box.
-  const budgetMb = getAvailableVram(hardware);
-  const reserveMb = Math.max(CONTEXT_COMPUTE_RESERVE_MB, budgetMb * CONTEXT_RESERVE_FRACTION);
-  const kvBudgetMb = budgetMb - quant.vramMb - reserveMb;
-
-  const kvPer1k = kvCacheMbPer1kTokens(model.parametersBillion);
-  const maxCtxByVram = (kvBudgetMb / kvPer1k) * 1000;
+  // Raw VRAM-afforded context capacity (shared with context-fit); snap it to a
+  // clean tier below.
+  const maxCtxByVram = maxContextTokensForVram(model, quant, hardware);
   const ceiling = Math.min(model.contextWindow, MAX_CONTEXT);
 
   // Largest tier that fits both the VRAM budget and the model's native window;
