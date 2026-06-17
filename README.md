@@ -196,11 +196,11 @@ Exposed tools:
 |---|---|
 | `scan` | Full hardware scan + ranked model recommendations |
 | `check` | "Can I run this model?" verdict (yes/maybe/no) with best quantization + speed estimate |
+| `context-fit-check` | "Will a prompt of N tokens fit?" — verdict (yes/tight/no), which ceiling is binding (model vs hardware), and a remedy |
 | `recommend` | Ranked model list for your hardware, filterable by category |
 | `doctor` | System health score with actionable suggestions |
 | `models` | Browse / search the model database, optionally filtered to models that fit |
 | `monitor` | One-shot live snapshot — CPU/GPU%, VRAM, temp, power, active Ollama model + tok/s |
-| `context-fit-check` | "Will a prompt of N tokens fit?" — verdict (yes/tight/no), which ceiling is binding (model vs hardware), and a remedy |
 
 ## Supported
 

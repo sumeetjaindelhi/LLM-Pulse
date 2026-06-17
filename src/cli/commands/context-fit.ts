@@ -99,15 +99,9 @@ export async function contextFitCommand(
     return;
   }
 
-  if (model.quantizations.length === 0) {
-    const payload = { error: `Model ${model.name} has no quantizations defined in the database` };
-    if (silent) console.log(JSON.stringify(payload, null, 2));
-    else console.log(`\n  ${theme.fail("✗")} ${payload.error}`);
-    return;
-  }
-
   // Resolve --quant if given; a typo is an error (with the available list) rather
-  // than a silent fall-through to the sweet spot.
+  // than a silent fall-through to the sweet spot. Ordered before the 0-quant guard
+  // to match the `check`/MCP path so all three surfaces report the same error.
   let forcedQuant: QuantizationVariant | undefined;
   if (options.quant) {
     const match = model.quantizations.find((q) => q.name.toLowerCase() === options.quant!.toLowerCase());
@@ -125,6 +119,13 @@ export async function contextFitCommand(
       return;
     }
     forcedQuant = match;
+  }
+
+  if (model.quantizations.length === 0) {
+    const payload = { error: `Model ${model.name} has no quantizations defined in the database` };
+    if (silent) console.log(JSON.stringify(payload, null, 2));
+    else console.log(`\n  ${theme.fail("✗")} ${payload.error}`);
+    return;
   }
 
   const result = checkContextFit(model, hardware, {
