@@ -132,6 +132,7 @@ Live TUI dashboard — like htop for LLMs. Press `Tab` to switch views, `q` to q
 - **Inference** — Throughput chart + session stats
 - **GPU** — Per-GPU utilization, temperature, VRAM, and power sparklines with peak stats + temperature alerts
 - **VRAM Map** — Visual VRAM breakdown (model weights / KV cache / overhead / free)
+- **Models** — Browse installed Ollama models; pull new ones or delete, from inside the TUI
 
 ```bash
 llm-pulse monitor
@@ -209,6 +210,10 @@ Exposed tools:
 **Runtimes:** [Ollama](https://ollama.com), [llama.cpp](https://github.com/ggerganov/llama.cpp), [LM Studio](https://lmstudio.ai)
 
 **Models:** 48 curated + 245+ via live Ollama library catalog (cached 24 h) — across general, coding, reasoning, creative, multilingual — each with Q4/Q5/Q8/F16 quantization variants
+
+## Stability
+
+llm-pulse follows [semantic versioning](https://semver.org). As of **1.0.0**, the CLI commands and flags, the `table`/`json`/`csv` output shapes, the programmatic API (`detectHardware`, `getRecommendations`), and the 7 MCP tools are considered stable — any breaking change to them bumps the major version.
 
 ## License
 

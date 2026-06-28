@@ -11,4 +11,5 @@ ARCHITECTURE.md
 CLAUDE.md
 *.md
 !README.md
+!CHANGELOG.md
 *.yml
