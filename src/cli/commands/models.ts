@@ -1,6 +1,6 @@
 import ora from "ora";
 import Table from "cli-table3";
-import { getAllModels, searchModels, filterByCategory } from "../../models/database.js";
+import { filterByCategory, searchModels } from "../../models/database.js";
 import { getMergedModels } from "../../models/merged-models.js";
 import { detectHardware } from "../../hardware/index.js";
 import { scoreModel, isFitting } from "../../analysis/scorer.js";
@@ -30,10 +30,9 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
     return liveModelsCommand(options, ollamaHost);
   }
 
-  let models: ModelEntry[];
-
-  // Filter by search or category
-  models = options.search ? searchModels(options.search) : filterByCategory(options.category);
+  const models = options.search
+    ? searchModels(options.search, options.category)
+    : filterByCategory(options.category);
 
   // If --fits, we need hardware info
   let hardware: HardwareProfile | null = null;
@@ -122,7 +121,7 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
       theme.muted("Fit"),
       theme.muted("Categories"),
     ],
-    style: { head: [], border: ["gray"], compact: true },
+    style: { head: [], border: [], compact: true },
     chars: borderlessTableChars,
   });
 
@@ -275,7 +274,7 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
       theme.muted("Fit"),
       theme.muted("Source"),
     ],
-    style: { head: [], border: ["gray"], compact: true },
+    style: { head: [], border: [], compact: true },
     chars: borderlessTableChars,
   });
 

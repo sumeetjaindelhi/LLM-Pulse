@@ -39,7 +39,7 @@ function verdictLine(verdict: Verdict, modelName: string): string {
 function quantTable(scores: ModelScore[], bestIdx: number, availableVramMb: number): string {
   const table = new Table({
     chars: borderlessTableChars,
-    style: { "padding-left": 0, "padding-right": 0, head: ["gray"] },
+    style: { "padding-left": 0, "padding-right": 0, head: [], border: [] },
   });
 
   table.push(["Quant", "VRAM", "Available", "Fit", "Speed", "Score"]);
@@ -159,8 +159,8 @@ function outputTable(
   if (hardware.primaryGpu) {
     lines.push(keyValue("GPU", hardware.primaryGpu.model));
     lines.push(keyValue("VRAM", formatMb(availableVramMb)));
-    if (hardware.primaryGpu.vendor === "Apple") {
-      lines.push(subLine("(unified memory — 75% usable for inference)"));
+    if (hardware.primaryGpu.acceleratorType === "metal") {
+      lines.push(subLine("(unified memory — shared with system RAM)"));
     }
   } else {
     lines.push(keyValue("GPU", theme.muted("None — CPU inference (using RAM)")));

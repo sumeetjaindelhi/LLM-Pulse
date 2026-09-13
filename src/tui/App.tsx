@@ -1,7 +1,6 @@
 import React, { useReducer, useEffect, useRef, useCallback } from "react";
 import { Text, Box, useInput, useApp } from "ink";
 import { Overview } from "./Overview.js";
-import { Inference } from "./Inference.js";
 import { GpuDetail } from "./GpuDetail.js";
 import { VramMap } from "./VramMap.js";
 import { ModelManager } from "./ModelManager.js";
@@ -9,10 +8,9 @@ import { HardwareMonitor, type MonitorSnapshot } from "../hardware/monitor.js";
 import { OLLAMA_API_URL } from "../core/constants.js";
 import type { MonitorTab, SessionStats } from "../core/types.js";
 
-const TABS: MonitorTab[] = ["overview", "inference", "gpu", "vram", "models"];
+const TABS: MonitorTab[] = ["overview", "gpu", "vram", "models"];
 const TAB_LABELS: Record<MonitorTab, string> = {
   overview: "Overview",
-  inference: "Inference",
   gpu: "GPU",
   vram: "VRAM",
   models: "Models",
@@ -56,7 +54,6 @@ interface MonitorState {
   session: SessionStats;
   cpuHistory: number[];
   gpuHistory: number[];
-  tokHistory: number[];
   gpuTempHistory: number[];
   gpuVramHistory: number[];
   gpuPowerHistory: number[];
@@ -68,7 +65,6 @@ type MonitorAction = {
   session: SessionStats;
   cpuHistory: number[];
   gpuHistory: number[];
-  tokHistory: number[];
   gpuTempHistory: number[];
   gpuVramHistory: number[];
   gpuPowerHistory: number[];
@@ -79,7 +75,6 @@ const initialState: MonitorState = {
   session: EMPTY_SESSION,
   cpuHistory: [],
   gpuHistory: [],
-  tokHistory: [],
   gpuTempHistory: [],
   gpuVramHistory: [],
   gpuPowerHistory: [],
@@ -93,7 +88,6 @@ function monitorReducer(_state: MonitorState, action: MonitorAction): MonitorSta
         session: action.session,
         cpuHistory: action.cpuHistory,
         gpuHistory: action.gpuHistory,
-        tokHistory: action.tokHistory,
         gpuTempHistory: action.gpuTempHistory,
         gpuVramHistory: action.gpuVramHistory,
         gpuPowerHistory: action.gpuPowerHistory,
@@ -117,7 +111,7 @@ export function App({ host }: { host?: string }) {
     const handler = (s: MonitorSnapshot) => {
       ticksRef.current += 1;
 
-      // Single dispatch replaces 7 separate setState calls
+      // Single dispatch replaces 6 separate setState calls
       dispatch({
         type: "tick",
         snapshot: s,
@@ -127,7 +121,6 @@ export function App({ host }: { host?: string }) {
         },
         cpuHistory: [...monitor.cpuHistory],
         gpuHistory: [...monitor.gpuHistory],
-        tokHistory: [...monitor.tokHistory],
         gpuTempHistory: [...monitor.gpuTempHistory],
         gpuVramHistory: [...monitor.gpuVramHistory],
         gpuPowerHistory: [...monitor.gpuPowerHistory],
@@ -185,14 +178,6 @@ export function App({ host }: { host?: string }) {
           session={state.session}
           cpuHistory={state.cpuHistory}
           gpuHistory={state.gpuHistory}
-          tokHistory={state.tokHistory}
-        />
-      )}
-      {activeTab === "inference" && (
-        <Inference
-          snapshot={state.snapshot}
-          session={state.session}
-          tokHistory={state.tokHistory}
         />
       )}
       {activeTab === "gpu" && (

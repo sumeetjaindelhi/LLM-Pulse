@@ -10,8 +10,9 @@ export async function detectLlamaCpp(): Promise<RuntimeInfo> {
     models: [],
   };
 
-  // Check for various llama.cpp binary names
-  const binaries = ["llama-server", "llama-cli", "llama-cpp", "main"];
+  // Check for various llama.cpp binary names. The legacy `main` name is left
+  // out on purpose: too many unrelated tools ship a binary called `main`.
+  const binaries = ["llama-server", "llama-cli", "llama-cpp"];
   const whichCmd = process.platform === "win32" ? "where" : "which";
 
   for (const bin of binaries) {

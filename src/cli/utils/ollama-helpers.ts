@@ -5,6 +5,7 @@ export async function pickOllamaModel(baseUrl: string): Promise<string | null> {
   try {
     const res = await fetch(`${baseUrl}/api/tags`, {
       signal: AbortSignal.timeout(3000),
+      redirect: "error",
     });
     if (!res.ok) return null;
     const data = OllamaPickModelSchema.parse(await res.json());

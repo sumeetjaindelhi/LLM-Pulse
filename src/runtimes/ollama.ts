@@ -13,20 +13,22 @@ export async function detectOllama(host?: string): Promise<RuntimeInfo> {
     models: [],
   };
 
-  // Check if binary exists
+  // Check if binary exists. A missing binary is not conclusive: the API may
+  // still be served by a container, a remote host, or an app bundle not on PATH.
   try {
     const whichCmd = process.platform === "win32" ? "where" : "which";
     const { stdout } = await execa(whichCmd, ["ollama"], { timeout: 5000 });
     info.path = stdout.trim().split("\n")[0];
     info.status = "installed";
   } catch {
-    return info;
+    // not on PATH
   }
 
   // Check if API is running and get version
   try {
     const response = await fetch(`${baseUrl}/api/version`, {
       signal: AbortSignal.timeout(3000),
+      redirect: "error",
     });
     if (response.ok) {
       const data = OllamaVersionSchema.parse(await response.json());
@@ -34,13 +36,15 @@ export async function detectOllama(host?: string): Promise<RuntimeInfo> {
       info.status = "running";
     }
   } catch {
-    // API not running, try getting version from CLI
-    try {
-      const { stdout } = await execa("ollama", ["--version"], { timeout: 5000 });
-      const match = stdout.match(/(\d+\.\d+\.\d+)/);
-      if (match) info.version = match[1];
-    } catch {
-      // ignore
+    // API not running, try getting version from the CLI if it is installed
+    if (info.path) {
+      try {
+        const { stdout } = await execa("ollama", ["--version"], { timeout: 5000 });
+        const match = stdout.match(/(\d+\.\d+\.\d+)/);
+        if (match) info.version = match[1];
+      } catch {
+        // ignore
+      }
     }
     return info;
   }
@@ -49,6 +53,7 @@ export async function detectOllama(host?: string): Promise<RuntimeInfo> {
   try {
     const response = await fetch(`${baseUrl}/api/tags`, {
       signal: AbortSignal.timeout(3000),
+      redirect: "error",
     });
     if (response.ok) {
       const data = OllamaTagsSchema.parse(await response.json());

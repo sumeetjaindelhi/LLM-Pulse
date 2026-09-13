@@ -8,6 +8,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Releases before `1.0.0` predate this changelog and were not consistently
 > git-tagged, so their dates are omitted rather than reconstructed.
 
+## [1.1.0] - 2026-09-13
+
+### Added
+- `report` command: prints a paste-ready GitHub-flavoured markdown system report
+  (hardware, runtimes, health score, top recommended models) for GitHub issues,
+  Reddit and Discord. Flags `-c/--category`, `-t/--top`, `-H/--host`, same as
+  `scan`. Private by default — runtime install paths, installed model names and
+  the Ollama host URL are never printed — and untrusted strings (driver-reported
+  hardware names, Ollama versions) are escaped so they cannot inject table rows,
+  HTML, links, bidi spoofing or terminal control sequences. CLI only; the MCP
+  server stays at 7 tools.
+- Monitor Overview and the MCP `monitor` snapshot show the loaded model's context
+  length (`modelContextLength`, from Ollama `/api/ps`).
+- Model database: optional `kvMbPer1kTokens` field on the exported `ModelEntry`
+  type (real fp16 KV-cache MB per 1K tokens), set for 14 curated models.
+- `searchModels(query, category?)` accepts an optional category filter.
+
+### Changed
+- `engines.node` is now `>=20.5.0`. 1.0.0 already needed it in practice (its
+  `ink` and `execa` dependencies require Node 20 / 20.5).
+
+### Removed
+- Monitor Inference tab, tok/s displays, the "generating" status and tok/s-based
+  alerts (speed drop, GPU underutilized, faster/slower than expected). Ollama's
+  `/api/ps` exposes no live throughput, so they never showed real data. The
+  exported `MonitorTab` type no longer includes `"inference"`. `tokensPerSec`
+  stays in JSON / MCP snapshots and is always `null`.
+
+### Fixed
+- **Model library scraper:** `models --library` / `--refresh` parse the current
+  ollama.com/library markup again (it returned 0 models); an offline `--refresh`
+  keeps the cached catalog instead of deleting it. Parsing is linear, responses
+  declaring more than 5 MB are refused before download, and model cards over
+  64 KB are skipped.
+- **Model data and tags:** Ollama pull tags — Llama 4 Scout is `llama4:scout`,
+  Command R 7B is `command-r7b` (release date 2024-12). `models --search` also
+  applies `--category` (CLI and MCP `models` tool).
+- **Analysis correctness:**
+  - `optimize` / `check` / `quant-advice` / `context-fit`: when no quant fits
+    comfortably, the auto-picked quant is a tight fit rather than a
+    higher-quality fit that needs CPU offload (e.g. Q4_K_M instead of Q5_K_M on
+    16 GB Apple M2 + deepseek-r1-7b).
+  - `optimize` / `context-fit`: KV-cache estimates use the per-model figures, so
+    recommended `num_ctx` and context ceilings are lower (and no longer risk OOM)
+    for phi-3-mini, phi-4-mini, codellama-7b/13b, gemma-2-2b/9b,
+    gemma-3-4b/12b/27b, qwen-3-0.6b/1.7b/4b, llama-3.2-3b and smollm2-1.7b.
+  - `optimize`: when the KV budget cannot hold the 2048-token floor, `num_batch`
+    is 256 and the note warns of CPU offload.
+  - `context-fit` remedy no longer suggests trimming the prompt to 0 tokens.
+  - `compare --quant` is case-insensitive, like the other commands.
+  - `check` on Apple Silicon no longer claims "75% usable for inference".
+- **CLI input validation and exit codes:**
+  - Invalid `--format` / `--category` values are rejected with exit 1 instead of
+    silently falling back. `--help` lists the allowed choices.
+  - Numeric flags (`--top`, `--prompt-tokens`, `--response-tokens`, `--rounds`,
+    `--context-size`) accept only whole decimal integers; `50k`, `1.5`, `-1` etc.
+    are rejected with exit 1 instead of being truncated or replaced by the
+    default.
+  - Error outputs exit with code 1: model not found (`check`, `quant-advice`,
+    `optimize`, `context-fit`, `compare`), unknown `--quant` in `context-fit`, no
+    fitting quantization in `optimize`, `compare` with fewer than 2 models, and
+    `benchmark`/`profile` when Ollama is not running, no models are installed or
+    every run failed. Payload shapes are unchanged.
+  - `compare --format json/csv` writes warnings to stderr, so stdout is always
+    valid JSON/CSV.
+  - Table borders no longer contain ANSI colour codes when piped or with
+    `NO_COLOR`.
+  - `profile` no longer hangs after a failed inference.
+- **Hardware and runtime detection:**
+  - Multi-NVIDIA: each card reports its own stats, and one card nvidia-smi cannot
+    read no longer disables CUDA detection for the others.
+  - AMD GPUs are detected from rocm-smi CSV output when `--json` is unavailable;
+    the monitor shows AMD live stats.
+  - Intel iGPUs report `vramMb` 0 so models are scored against system RAM;
+    discrete Intel Arc cards keep their reported VRAM.
+  - Containers (cgroups v1/v2): `memory.availableMb` is capped at the container's
+    limit minus its current usage, excluding reclaimable page cache.
+  - Apple Silicon `monitor`: `gpuVramTotalMb` is the Metal wired limit, matching
+    `scan`, instead of total RAM.
+  - Linux hybrid CPUs count performance cores from per-CPU topology instead of
+    halving (wrong on hybrid CPUs without SMT).
+  - Ollama is reported running when its API answers even if the binary is not on
+    `PATH`; an unrelated `main` binary is no longer mistaken for llama.cpp.
+- **TUI model manager:** `d` asks for confirmation before deleting; mid-stream
+  pull failures show as errors instead of "Download complete!"; leaving the
+  Models tab or quitting aborts an in-flight pull.
+
+### Security
+- MCP server: Ollama / LM Studio hosts resolved from `.llmpulserc` or
+  `OLLAMA_HOST` are validated as loopback, otherwise the default local URL is
+  used. The unused `host` input on the `check`, `recommend` and `models` tools
+  is documented as ignored.
+- Local Ollama / LM Studio API calls refuse HTTP redirects.
+- Cache writes are atomic (temp file + rename) and replace, rather than follow,
+  a planted symlink, even a dangling one; a failed write leaves no temp file
+  behind.
+- `npm audit fix` lockfile refresh: 0 production advisories.
+
+### Verified
+- 311 tests across 41 test files.
+
 ## [1.0.0] - 2026-06-28
 
 First stable release. **No functional changes from 0.9.7** — this release marks

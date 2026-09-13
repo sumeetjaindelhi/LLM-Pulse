@@ -3,8 +3,9 @@ import si from "systeminformation";
 import { execa } from "execa";
 import { OLLAMA_API_URL, ALERT_THRESHOLDS } from "../core/constants.js";
 import { OllamaPsSchema } from "../core/api-schemas.js";
-import { parseRocmCsv } from "./gpu.js";
-import type { SessionStats, ModelUsage } from "../core/types.js";
+import { readRocmGpuStats } from "./gpu.js";
+import { readAppleVramLimit } from "./apple-memory.js";
+import type { SessionStats } from "../core/types.js";
 
 export interface MonitorSnapshot {
   cpuPercent: number;
@@ -36,26 +37,19 @@ export class HardwareMonitor extends EventEmitter {
   private intervalMs = 2000;
   private gpuVendor: "NVIDIA" | "AMD" | "Apple" | "unknown" = "unknown";
   private gpuModelName: string | null = null;
-  // Cached on Apple Silicon only: total unified memory, used as the GPU's
-  // effective "total VRAM" since ioreg's PerformanceStatistics doesn't expose
-  // a total VRAM figure for Apple Silicon.
+  // Cached on Apple Silicon only: the Metal wired-memory limit, used as the
+  // GPU's "total VRAM" since ioreg's PerformanceStatistics doesn't expose a
+  // total VRAM figure. Resolved the same way scan resolves primaryGpu.vramMb.
   private appleVramTotalMb: number | null = null;
   private ollamaBaseUrl: string;
 
   // Sparkline history (ring buffer of last N snapshots)
   readonly cpuHistory: number[] = [];
   readonly gpuHistory: number[] = [];
-  readonly tokHistory: number[] = [];
   readonly gpuTempHistory: number[] = [];
   readonly gpuVramHistory: number[] = [];
   readonly gpuPowerHistory: number[] = [];
   private readonly maxHistory = ALERT_THRESHOLDS.sparklineHistory;
-  // Cap on session.modelHistory entries — prevents unbounded growth over
-  // long-running monitor sessions. 50 is roomy for realistic usage (active
-  // developers typically cycle through 10-20 quants max) while keeping the
-  // per-tick React state copy O(1) bounded. Eviction is FIFO via JS Map's
-  // insertion-order iteration.
-  private readonly maxModelHistory = 50;
 
   // Session tracking
   readonly session: SessionStats = {
@@ -68,8 +62,6 @@ export class HardwareMonitor extends EventEmitter {
   };
 
   private lastModel: string | null = null;
-  private lastTokPerSec: number | null = null;
-  private lastPollTime: number = Date.now();
 
   constructor(ollamaHost?: string) {
     super();
@@ -81,7 +73,6 @@ export class HardwareMonitor extends EventEmitter {
     this.running = true;
     this.intervalMs = intervalMs;
     this.session.startedAt = Date.now();
-    this.lastPollTime = Date.now();
 
     // Detect GPU vendor before first poll so AMD/Apple users get correct data immediately
     this.detectGpuVendor().then(() => {
@@ -101,10 +92,9 @@ export class HardwareMonitor extends EventEmitter {
         if (v.includes("apple")) {
           this.gpuVendor = "Apple";
           this.gpuModelName = c.model;
-          // Cache total system memory as the Apple GPU's effective VRAM.
           try {
             const mem = await si.mem();
-            this.appleVramTotalMb = Math.round(mem.total / (1024 * 1024));
+            this.appleVramTotalMb = (await readAppleVramLimit(mem.total)).vramMb;
           } catch {
             // leave as null; pollGpuApple will report null vramTotalMb
           }
@@ -122,9 +112,6 @@ export class HardwareMonitor extends EventEmitter {
       clearTimeout(this.timeout);
       this.timeout = null;
     }
-    // Release the modelHistory Map so long-running processes that stop and
-    // restart monitors don't accumulate state across sessions.
-    this.session.modelHistory.clear();
   }
 
   private pushHistory(arr: number[], value: number | null): void {
@@ -132,67 +119,15 @@ export class HardwareMonitor extends EventEmitter {
     if (arr.length > this.maxHistory) arr.shift();
   }
 
+  // Only model swaps are tracked. Token and request totals stay at their
+  // initial values: Ollama's /api/ps exposes no throughput to count from.
   private updateSession(snapshot: MonitorSnapshot): void {
-    const now = Date.now();
-    // Cap elapsed at 1.5× the poll interval. Without this cap, a skipped poll
-    // (gatherSnapshot took >interval due to slow ioreg/fetch) gives elapsed=4s+
-    // and multiplying the instantaneous tokensPerSec by that inflates the
-    // token count. Ollama's /api/ps reports the LAST-KNOWN rate, not a rolling
-    // average, so over-counting also happens when the model goes idle between
-    // prompts. The cap bounds the error to ~1 interval per incident.
-    const elapsed = Math.min(now - this.lastPollTime, this.intervalMs * 1.5);
-    this.lastPollTime = now;
-
-    // Detect model swap
     if (snapshot.activeModel && snapshot.activeModel !== this.lastModel) {
       if (this.lastModel !== null) {
-        this.session.lastModelSwapAt = now;
+        this.session.lastModelSwapAt = Date.now();
       }
       this.lastModel = snapshot.activeModel;
     }
-
-    // Track tokens + time for active model
-    if (snapshot.activeModel && snapshot.tokensPerSec !== null && snapshot.tokensPerSec > 0) {
-      const tokensThisPoll = snapshot.tokensPerSec * (elapsed / 1000);
-      this.session.totalTokens += tokensThisPoll;
-      this.session.totalTimeMs += elapsed;
-
-      let usage = this.session.modelHistory.get(snapshot.activeModel);
-      if (!usage) {
-        // FIFO-evict the oldest entry if we're at the cap. JS Map preserves
-        // insertion order, so the first key is the oldest.
-        if (this.session.modelHistory.size >= this.maxModelHistory) {
-          const oldest = this.session.modelHistory.keys().next().value;
-          if (oldest !== undefined) this.session.modelHistory.delete(oldest);
-        }
-        usage = {
-          name: snapshot.activeModel,
-          avgTokPerSec: 0,
-          totalTokens: 0,
-          totalTimeMs: 0,
-          requests: 0,
-          startedAt: now,
-        };
-        this.session.modelHistory.set(snapshot.activeModel, usage);
-      }
-      usage.totalTokens += tokensThisPoll;
-      usage.totalTimeMs += elapsed;
-      usage.avgTokPerSec = usage.totalTokens / (usage.totalTimeMs / 1000);
-    }
-
-    // Detect new request (tok/s goes from 0/null to positive)
-    if (
-      snapshot.activeModel &&
-      snapshot.tokensPerSec !== null &&
-      snapshot.tokensPerSec > 0 &&
-      (this.lastTokPerSec === null || this.lastTokPerSec === 0)
-    ) {
-      this.session.totalRequests++;
-      const usage = this.session.modelHistory.get(snapshot.activeModel);
-      if (usage) usage.requests++;
-    }
-
-    this.lastTokPerSec = snapshot.tokensPerSec;
   }
 
   private async gatherSnapshot(): Promise<MonitorSnapshot> {
@@ -218,7 +153,8 @@ export class HardwareMonitor extends EventEmitter {
       gpuVendor: this.gpuVendor === "unknown" ? null : this.gpuVendor,
       gpuModel: this.gpuModelName,
       activeModel: ollama.model,
-      tokensPerSec: ollama.tokensPerSec,
+      // Kept for output-shape stability; /api/ps has no throughput figure.
+      tokensPerSec: null,
       modelSize: ollama.modelSize,
       modelQuantization: ollama.modelQuantization,
       modelContextLength: ollama.contextLength,
@@ -250,7 +186,6 @@ export class HardwareMonitor extends EventEmitter {
       // Update histories
       this.pushHistory(this.cpuHistory, snapshot.cpuPercent);
       this.pushHistory(this.gpuHistory, snapshot.gpuPercent);
-      this.pushHistory(this.tokHistory, snapshot.tokensPerSec);
       this.pushHistory(this.gpuTempHistory, snapshot.gpuTemp);
       const vramPercent = snapshot.gpuVramUsedMb !== null && snapshot.gpuVramTotalMb !== null && snapshot.gpuVramTotalMb > 0
         ? (snapshot.gpuVramUsedMb / snapshot.gpuVramTotalMb) * 100
@@ -314,7 +249,8 @@ export class HardwareMonitor extends EventEmitter {
         "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total,power.draw,clocks.current.graphics",
         "--format=csv,noheader,nounits",
       ], { timeout: 5000 });
-      const parts = stdout.trim().split(",").map((s) => s.trim());
+      // The monitor tracks a single GPU: the first nvidia-smi row.
+      const parts = stdout.trim().split("\n")[0].split(",").map((s) => s.trim());
       const percent = parseInt(parts[0], 10);
       const vramUsedMb = parseInt(parts[2], 10);
       const vramTotalMb = parseInt(parts[3], 10);
@@ -337,15 +273,9 @@ export class HardwareMonitor extends EventEmitter {
   private async pollGpuAmd() {
     const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null };
     try {
-      const { stdout } = await execa("rocm-smi", [
-        "--showmeminfo", "vram",
-        "--showtemp",
-        "--showuse",
-        "--csv",
-      ], { timeout: 5000 });
-
-      const stats = parseRocmCsv(stdout);
-      if (stats.vramTotalMb === 0) return nullResult;
+      // The monitor tracks a single GPU: card 0.
+      const [stats] = await readRocmGpuStats();
+      if (!stats || stats.vramTotalMb === 0) return nullResult;
 
       return {
         percent: stats.utilizationPercent || null,
@@ -399,9 +329,9 @@ export class HardwareMonitor extends EventEmitter {
         percent: utilPercent,
         temp: null,
         vramUsedMb: inUseBytes !== null ? Math.round(inUseBytes / (1024 * 1024)) : null,
-        // Report the cached unified-memory total as the GPU's "total VRAM" —
-        // architecturally accurate on Apple Silicon (Metal can address all
-        // system RAM). If detectGpuVendor couldn't read si.mem(), this is null.
+        // Report the cached Metal wired-memory limit as the GPU's "total VRAM"
+        // — the most memory Metal can keep wired for the GPU. If
+        // detectGpuVendor couldn't read si.mem(), this is null.
         vramTotalMb: this.appleVramTotalMb,
         powerWatt: null,
         clockMhz: null,
@@ -415,11 +345,11 @@ export class HardwareMonitor extends EventEmitter {
     try {
       const res = await fetch(`${this.ollamaBaseUrl}/api/ps`, {
         signal: AbortSignal.timeout(2000),
+        redirect: "error",
       });
       if (!res.ok)
         return {
           model: null,
-          tokensPerSec: null,
           modelSize: null,
           modelQuantization: null,
           contextLength: null,
@@ -431,7 +361,6 @@ export class HardwareMonitor extends EventEmitter {
       if (data.models.length === 0)
         return {
           model: null,
-          tokensPerSec: null,
           modelSize: null,
           modelQuantization: null,
           contextLength: null,
@@ -445,16 +374,14 @@ export class HardwareMonitor extends EventEmitter {
 
       return {
         model: active.name,
-        tokensPerSec: active.details?.tokens_per_second ?? null,
         modelSize: sizeGb,
         modelQuantization: active.details?.quantization_level ?? null,
-        contextLength: null, // Ollama /api/ps doesn't expose this directly
+        contextLength: active.context_length ?? null,
         maxContext: null,
       };
     } catch {
       return {
         model: null,
-        tokensPerSec: null,
         modelSize: null,
         modelQuantization: null,
         contextLength: null,

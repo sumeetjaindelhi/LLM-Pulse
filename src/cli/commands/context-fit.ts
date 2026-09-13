@@ -106,6 +106,7 @@ export async function contextFitCommand(
   if (options.quant) {
     const match = model.quantizations.find((q) => q.name.toLowerCase() === options.quant!.toLowerCase());
     if (!match) {
+      process.exitCode = 1;
       const payload = {
         error: `Quantization "${options.quant}" not found for ${model.name}`,
         availableQuantizations: model.quantizations.map((q) => q.name),
@@ -122,6 +123,7 @@ export async function contextFitCommand(
   }
 
   if (model.quantizations.length === 0) {
+    process.exitCode = 1;
     const payload = { error: `Model ${model.name} has no quantizations defined in the database` };
     if (silent) console.log(JSON.stringify(payload, null, 2));
     else console.log(`\n  ${theme.fail("✗")} ${payload.error}`);

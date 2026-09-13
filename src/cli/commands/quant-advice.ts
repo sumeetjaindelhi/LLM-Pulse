@@ -100,7 +100,7 @@ function adviceTable(
 ): string {
   const table = new Table({
     chars: borderlessTableChars,
-    style: { "padding-left": 0, "padding-right": 0, head: ["gray"] },
+    style: { "padding-left": 0, "padding-right": 0, head: [], border: [] },
   });
 
   table.push(["Quant", "Bits", "Size", "Quality", "Fit", "Speed"]);

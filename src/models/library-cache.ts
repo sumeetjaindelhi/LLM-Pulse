@@ -30,8 +30,9 @@ export async function getLibraryCatalog(
 ): Promise<LibraryCatalogModel[]> {
   const refresh = opts.refresh ?? false;
 
+  // A refresh skips the cached copy but leaves it on disk: it is the stale
+  // fallback if the fetch below fails, and a successful fetch overwrites it.
   if (refresh) {
-    clearCacheEntry(CACHE_NAME);
     memo = null;
   }
 

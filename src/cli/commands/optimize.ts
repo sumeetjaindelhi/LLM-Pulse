@@ -250,6 +250,7 @@ function outputCsv(ctx: OptimizeContext): void {
 }
 
 function renderNoFit(model: ModelEntry, hardware: HardwareProfile, silent: boolean): void {
+  process.exitCode = 1;
   const availableVramMb = getAvailableVram(hardware);
   if (silent) {
     console.log(JSON.stringify({ error: "No quantization fits", model: model.id, vramMb: availableVramMb }, null, 2));

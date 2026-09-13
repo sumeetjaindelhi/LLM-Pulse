@@ -10,7 +10,6 @@ interface OverviewProps {
   session: SessionStats;
   cpuHistory: number[];
   gpuHistory: number[];
-  tokHistory: number[];
 }
 
 function barColor(percent: number): string {
@@ -36,7 +35,7 @@ function formatUptime(startedAt: number): string {
   return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
-export const Overview = React.memo(function Overview({ snapshot, session, cpuHistory, gpuHistory, tokHistory }: OverviewProps) {
+export const Overview = React.memo(function Overview({ snapshot, session, cpuHistory, gpuHistory }: OverviewProps) {
   const vramPercent =
     snapshot.gpuVramUsedMb !== null && snapshot.gpuVramTotalMb !== null && snapshot.gpuVramTotalMb > 0
       ? Math.round((snapshot.gpuVramUsedMb / snapshot.gpuVramTotalMb) * 100)
@@ -110,16 +109,16 @@ export const Overview = React.memo(function Overview({ snapshot, session, cpuHis
             )}
             {snapshot.modelQuantization && <Text dimColor>{")"}</Text>}
             <Text dimColor>{"     Status: "}</Text>
-            <Text color={snapshot.tokensPerSec !== null && snapshot.tokensPerSec > 0 ? "green" : "yellow"}>
-              {snapshot.tokensPerSec !== null && snapshot.tokensPerSec > 0 ? "generating" : "loaded"}
-            </Text>
+            <Text color="yellow">{"loaded"}</Text>
           </Text>
           <Text>
-            <Text dimColor>{"  Speed: "}</Text>
-            <Text color="green">
-              {snapshot.tokensPerSec !== null ? `${snapshot.tokensPerSec.toFixed(1)} tok/s` : "idle"}
-            </Text>
-            <Text dimColor>{"          Uptime: "}</Text>
+            {snapshot.modelContextLength !== null && (
+              <>
+                <Text dimColor>{"  Context: "}</Text>
+                <Text>{`${snapshot.modelContextLength.toLocaleString()} tokens`}</Text>
+              </>
+            )}
+            <Text dimColor>{"  Uptime: "}</Text>
             <Text>{formatUptime(session.startedAt)}</Text>
           </Text>
         </Box>
@@ -130,7 +129,7 @@ export const Overview = React.memo(function Overview({ snapshot, session, cpuHis
       <Text>{""}</Text>
 
       {/* Smart alerts */}
-      <AlertBar snapshot={snapshot} session={session} tokHistory={tokHistory} />
+      <AlertBar snapshot={snapshot} session={session} />
     </Box>
   );
 });

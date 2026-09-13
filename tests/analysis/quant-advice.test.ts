@@ -89,6 +89,22 @@ describe("quant-advice sweet-spot picker", () => {
     expect(tightScores[idx].fitLevel).toBe("tight");
   });
 
+  it("prefers a tight quant over a higher-quality barely quant that needs CPU offload", () => {
+    const tight = makeScore({ name: "Q4_K_M", bitsPerWeight: 4.83, qualityRetention: 0.92, fitLevel: "tight" });
+    const barely = makeScore({ name: "Q5_K_M", bitsPerWeight: 5.69, qualityRetention: 0.95, fitLevel: "barely" });
+    const scores = [tight, barely];
+
+    expect(scores[pickSweetSpot(scores)].quantization.name).toBe("Q4_K_M");
+  });
+
+  it("falls back to a barely quant only when nothing is comfortable or tight", () => {
+    const cannot = makeScore({ name: "Q8_0", bitsPerWeight: 8.5, qualityRetention: 0.99, fitLevel: "cannot_run" });
+    const barely = makeScore({ name: "Q4_K_M", bitsPerWeight: 4.83, qualityRetention: 0.92, fitLevel: "barely" });
+    const scores = [barely, cannot];
+
+    expect(pickSweetSpot(scores)).toBe(0);
+  });
+
   it("breaks ties by higher bitsPerWeight — prefers fuller precision when quality is equal", () => {
     const fakeModel = getModelById("llama-3.1-8b")!;
     const tiedScores: ModelScore[] = [

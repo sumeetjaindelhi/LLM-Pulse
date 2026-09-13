@@ -71,7 +71,13 @@ function buildRemedy(
       return `Switch to ${smaller.name} — affords ${smaller.effective.toLocaleString()} tokens on this hardware.`;
     }
   }
-  const trimTo = Math.max(0, effectiveMax - responseTokens);
+  if (effectiveMax === 0) {
+    return `${quant.name} weights alone exceed the memory pool — use a smaller quant or model.`;
+  }
+  const trimTo = effectiveMax - responseTokens;
+  if (trimTo <= 0) {
+    return `Response reserve (${responseTokens.toLocaleString()} tokens) leaves no room in the ${effectiveMax.toLocaleString()}-token ceiling — lower the response reserve.`;
+  }
   const offload = hardware.primaryGpu && hardware.primaryGpu.acceleratorType !== "metal"
     ? ", or offload fewer layers to the GPU"
     : "";

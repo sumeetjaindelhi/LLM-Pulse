@@ -2,10 +2,11 @@ import { z } from "zod";
 
 const OLLAMA_LIBRARY_URL = "https://ollama.com/library";
 const DEFAULT_TIMEOUT_MS = 10_000;
-// Hard cap on HTML we'll parse — ollama.com/library is ~780 KB today, so 5 MB
-// is ~6x headroom. Anything larger is almost certainly adversarial and could
-// thrash the regex parser (quadratic behavior on pathological unclosed tags).
+// Hard cap on HTML we'll parse — ollama.com/library is ~820 KB today, so 5 MB
+// is ~6x headroom. Anything larger is almost certainly adversarial.
 const MAX_HTML_BYTES = 5 * 1024 * 1024;
+// Real model cards are a few KB; the card regexes are quadratic in block size.
+const MAX_CARD_BYTES = 64_000;
 const USER_AGENT = "llm-pulse (+https://github.com/sumeetjaindelhi/LLM-Pulse)";
 
 export const LibraryModelSchema = z
@@ -21,11 +22,13 @@ export const LibraryCatalogSchema = z.array(LibraryModelSchema);
 
 export type LibraryModel = z.infer<typeof LibraryModelSchema>;
 
-const MODEL_BLOCK_RE = /<li[^>]*\bx-test-model\b[^>]*>([\s\S]*?)<\/li>/g;
+// ollama.com/library carries no semantic hooks on its model cards, so fields
+// are anchored on the badge colour classes: indigo = capability, blue = size.
+const LI_OPEN_RE = /<li\b/;
 const SLUG_RE = /<a\s+href="\/library\/([a-zA-Z0-9._\/-]+)"/;
 const DESCRIPTION_RE = /<p\s+class="max-w-lg[^"]*"[^>]*>([\s\S]*?)<\/p>/;
-const CAPABILITY_RE = /<span[^>]*\bx-test-capability\b[^>]*>([\s\S]*?)<\/span>/g;
-const SIZE_RE = /<span[^>]*\bx-test-size\b[^>]*>([\s\S]*?)<\/span>/g;
+const CAPABILITY_RE = /<span[^>]*\btext-indigo-600\b[^>]*>([\s\S]*?)<\/span>/g;
+const SIZE_RE = /<span[^>]*\btext-blue-600\b[^>]*>([\s\S]*?)<\/span>/g;
 
 // Minimal HTML-entity decode for the subset Ollama's templating emits. One
 // pass over the string + a lookup table beats chaining 7 `.replace()` calls —
@@ -68,8 +71,13 @@ export function parseLibraryHtml(html: string): LibraryModel[] {
   const results: LibraryModel[] = [];
   const seen = new Set<string>();
 
-  for (const blockMatch of html.matchAll(MODEL_BLOCK_RE)) {
-    const block = blockMatch[1];
+  // Splitting on "<li" bounds every block regex to a single card, and the card
+  // size cap bounds the backtracking those regexes can do inside one card, so
+  // hostile input stays cheap to parse.
+  for (const chunk of html.split(LI_OPEN_RE).slice(1)) {
+    const end = chunk.indexOf("</li>");
+    if (end < 0 || end > MAX_CARD_BYTES) continue;
+    const block = chunk.slice(0, end);
 
     const slug = firstMatch(SLUG_RE, block);
     if (!slug) continue;
@@ -114,6 +122,12 @@ export async function fetchOllamaLibrary(opts: FetchLibraryOptions = {}): Promis
     });
     if (!res.ok) {
       throw new Error(`ollama.com/library returned HTTP ${res.status}`);
+    }
+    // Refuse an oversized body before buffering it. A missing or lying
+    // Content-Length still hits the cap in parseLibraryHtml.
+    const declaredBytes = Number(res.headers.get("content-length"));
+    if (declaredBytes > MAX_HTML_BYTES) {
+      throw new Error(`library HTML exceeds ${MAX_HTML_BYTES} bytes (${declaredBytes}) — refusing to download`);
     }
     const html = await res.text();
     const models = parseLibraryHtml(html);

@@ -14,19 +14,16 @@ import type {
   ModelCategory,
   HardwareProfile,
   CompareOptions,
+  QuantizationVariant,
 } from "../../core/types.js";
 
 function pickBestScore(
   model: ModelEntry,
   hardware: HardwareProfile,
   category: ModelCategory | "all",
-  forcedQuant?: string,
+  forcedQuant?: QuantizationVariant,
 ): ModelScore {
-  if (forcedQuant) {
-    const match = model.quantizations.find((q) => q.name === forcedQuant);
-    if (match) return scoreModel(model, match, hardware, category);
-    // Fall through to best if forced quant not found
-  }
+  if (forcedQuant) return scoreModel(model, forcedQuant, hardware, category);
 
   // Score all quantizations, pick highest compositeScore
   const scores = model.quantizations
@@ -69,18 +66,21 @@ export async function compareCommand(
 
   if (modelArgs.length > 0) {
     // Explicit mode: resolve each model arg
-    scores = resolveExplicitModels(modelArgs, hardware, options, spinner);
+    scores = resolveExplicitModels(modelArgs, hardware, options, spinner, silent);
   } else {
     // Category mode: auto-pick top N
-    scores = resolveCategoryModels(hardware, options, spinner);
+    scores = resolveCategoryModels(hardware, options, spinner, silent);
   }
 
   if (scores.length < 2) {
+    process.exitCode = 1;
     if (!silent) {
       console.log(`\n  ${theme.warning("Need at least 2 models to compare.")}`);
       console.log(`  ${theme.muted("Usage: llm-pulse compare <model1> <model2> [model3...]")}`);
+    } else if (isJson) {
+      console.log(JSON.stringify({ error: "Need at least 2 models to compare" }));
     } else {
-      console.log(isJson ? JSON.stringify({ error: "Need at least 2 models to compare" }) : "");
+      console.error("Need at least 2 models to compare");
     }
     return;
   }
@@ -102,24 +102,35 @@ function resolveExplicitModels(
   hardware: HardwareProfile,
   options: CompareOptions,
   spinner: ReturnType<typeof ora> | null,
+  silent: boolean,
 ): ModelScore[] {
   const scores: ModelScore[] = [];
+  // json/csv stdout must carry only the payload, so diagnostics go to stderr there.
+  const log = silent ? console.error : console.log;
+  const requestedQuant = options.quant?.toLowerCase();
 
   for (const arg of args) {
     const model = resolveModel(arg);
     if (!model) {
       spinner?.stop();
-      renderModelNotFound(arg, { suggestionsLimit: 3, identityFormat: "id", showBrowseHint: false });
+      if (silent) {
+        process.exitCode = 1;
+        log(`Model not found: ${arg}`);
+      } else {
+        renderModelNotFound(arg, { suggestionsLimit: 3, identityFormat: "id", showBrowseHint: false });
+      }
       continue;
     }
 
-    const forcedQuant = options.quant;
-    if (forcedQuant && !model.quantizations.some((q) => q.name === forcedQuant)) {
+    const forcedQuant = requestedQuant
+      ? model.quantizations.find((q) => q.name.toLowerCase() === requestedQuant)
+      : undefined;
+    if (requestedQuant && !forcedQuant) {
       spinner?.stop();
-      console.log(`  ${theme.warning("⚠")} ${model.name}: quant ${forcedQuant} not available, using best fit`);
+      log(`  ${theme.warning("⚠")} ${model.name}: quant ${options.quant} not available, using best fit`);
     }
 
-    scores.push(pickBestScore(model, hardware, options.category, options.quant));
+    scores.push(pickBestScore(model, hardware, options.category, forcedQuant));
   }
 
   return scores;
@@ -129,6 +140,7 @@ function resolveCategoryModels(
   hardware: HardwareProfile,
   options: CompareOptions,
   spinner: ReturnType<typeof ora> | null,
+  silent: boolean,
 ): ModelScore[] {
   const recs = getRecommendations(hardware, {
     category: options.category,
@@ -138,7 +150,7 @@ function resolveCategoryModels(
 
   if (recs.length < 2) {
     spinner?.stop();
-    console.log(`\n  ${theme.warning("Not enough models fit your hardware for this category.")}`);
+    (silent ? console.error : console.log)(`\n  ${theme.warning("Not enough models fit your hardware for this category.")}`);
     return [];
   }
 

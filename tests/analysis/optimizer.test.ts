@@ -92,6 +92,17 @@ describe("recommendContext", () => {
     expect(big).toBeGreaterThan(small);
   });
 
+  it("keeps phi-3-mini's recommended context within budget at its real MHA KV size", () => {
+    // Real fp16 KV for phi-3-mini: 32 layers x 32 KV heads x 96 head_dim x 4 bytes = 375 MiB / 1k.
+    const realKvMbPer1k = 375;
+    const phi3 = getModelById("phi-3-mini")!;
+    const budgetMb = HIGH_END.primaryGpu!.vramMb;
+    for (const quant of phi3.quantizations) {
+      const ctx = recommendContext(phi3, quant, HIGH_END).value as number;
+      expect((ctx / 1000) * realKvMbPer1k + quant.vramMb).toBeLessThanOrEqual(budgetMb);
+    }
+  });
+
   it("snaps to a context tier rather than an arbitrary number", () => {
     const q4 = quantOf(llama8b, "Q4_K_M");
     const ctx = recommendContext(llama8b, q4, HIGH_END).value as number;
@@ -119,6 +130,16 @@ describe("computeOptimization", () => {
   it("recommends num_gpu 0 on a CPU-only machine", () => {
     const p = computeOptimization(llama8b, CPU_ONLY)!;
     expect(p.numGpu?.value).toBe(0);
+  });
+
+  it("halves num_batch and warns of offload when the KV budget cannot hold the 2048 floor", () => {
+    // 6 GB GPU: Q5_K_M weights (5300 MB) fit comfortably, but only ~500 tokens of KV remain.
+    const qwen7b = getModelById("qwen-2.5-7b")!;
+    const profile = computeOptimization(qwen7b, withVram(HIGH_END, 6144), quantOf(qwen7b, "Q5_K_M"))!;
+    expect(profile.fitLevel).toBe("comfortable");
+    expect(profile.numCtx.value).toBe(2048);
+    expect(profile.numCtx.note).toContain("CPU offload");
+    expect(profile.numBatch.value).toBe(256);
   });
 
   it("returns null when no quantization fits at all", () => {

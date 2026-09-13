@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Text, Box, useInput } from "ink";
 import type { MonitorSnapshot } from "../hardware/monitor.js";
+import { parsePullLines, type PullStreamEvent } from "./pull-stream.js";
 
 interface ModelInfo {
   name: string;
@@ -39,13 +40,20 @@ export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaH
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mode, setMode] = useState<"installed" | "pull">("installed");
   const [pullProgress, setPullProgress] = useState<PullProgress | null>(null);
-  const [pullError, setPullError] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState(0);
+  // Aborts an in-flight pull when the tab unmounts (Tab switch or quit), so the
+  // streaming socket does not keep the process alive after the TUI exits.
+  const unmountAbortRef = useRef(new AbortController());
+
+  useEffect(() => () => unmountAbortRef.current.abort(), []);
 
   // Fetch installed models
   const fetchModels = useCallback(async () => {
     try {
       const res = await fetch(`${ollamaHost}/api/tags`, {
+        redirect: "error",
         signal: AbortSignal.timeout(3000),
       });
       if (!res.ok) return;
@@ -81,8 +89,19 @@ export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaH
   const items = mode === "installed" ? installed : suggestions;
   const maxIdx = items.length - 1;
 
+  // Keep the selection inside the list when it shrinks (delete or refresh).
+  useEffect(() => {
+    setSelectedIdx((i) => Math.min(i, Math.max(0, maxIdx)));
+  }, [maxIdx]);
+
   useInput((input, key) => {
     if (pullProgress?.downloading) return; // block input during download
+
+    if (pendingDelete !== null) {
+      if (input === "y") deleteModel(pendingDelete);
+      setPendingDelete(null);
+      return;
+    }
 
     if (key.upArrow) {
       setSelectedIdx((i) => Math.max(0, i - 1));
@@ -93,12 +112,12 @@ export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaH
     if (input === "p") {
       setMode("pull");
       setSelectedIdx(0);
-      setPullError(null);
+      setErrorMessage(null);
     }
     if (input === "i") {
       setMode("installed");
       setSelectedIdx(0);
-      setPullError(null);
+      setErrorMessage(null);
     }
     if (input === "r") {
       fetchModels();
@@ -112,59 +131,61 @@ export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaH
     if (input === "d" && mode === "installed" && installed.length > 0) {
       const selected = installed[selectedIdx];
       if (selected) {
-        deleteModel(selected.name);
+        setPendingDelete(selected.name);
       }
     }
   });
 
   async function pullModel(tag: string) {
     setPullProgress({ model: tag, status: "Starting download...", percent: 0, downloading: true });
-    setPullError(null);
+    setErrorMessage(null);
 
     try {
       const res = await fetch(`${ollamaHost}/api/pull`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: tag, stream: true }),
-        signal: AbortSignal.timeout(600000), // 10 min timeout
+        redirect: "error",
+        signal: AbortSignal.any([unmountAbortRef.current.signal, AbortSignal.timeout(600000)]), // 10 min timeout
       });
 
       if (!res.ok || !res.body) {
         setPullProgress(null);
-        setPullError(`Failed to pull ${tag}: HTTP ${res.status}`);
+        setErrorMessage(`Failed to pull ${tag}: HTTP ${res.status}`);
         return;
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = "";
+      let succeeded = false;
+
+      // Ollama reports pull failures as an {"error": ...} line on a 200 response.
+      const applyEvents = (events: PullStreamEvent[]) => {
+        for (const event of events) {
+          if (event.error) throw new Error(event.error);
+          if (event.status === "success") succeeded = true;
+          const percent = event.total && event.completed ? Math.round((event.completed / event.total) * 100) : 0;
+          setPullProgress({ model: tag, status: event.status ?? "", percent, downloading: true });
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
-        const text = decoder.decode(value, { stream: true });
-        const lines = text.split("\n").filter(Boolean);
-
-        for (const line of lines) {
-          try {
-            const json = JSON.parse(line);
-            const status = json.status ?? "";
-            let percent = 0;
-            if (json.total && json.completed) {
-              percent = Math.round((json.completed / json.total) * 100);
-            }
-            setPullProgress({ model: tag, status, percent, downloading: !json.status?.includes("success") });
-          } catch {
-            // skip malformed
-          }
-        }
+        const parsed = parsePullLines(buffer + decoder.decode(value, { stream: true }));
+        buffer = parsed.rest;
+        applyEvents(parsed.events);
       }
+      applyEvents(parsePullLines(`${buffer}${decoder.decode()}\n`).events);
+
+      if (!succeeded) throw new Error("stream ended without success");
 
       setPullProgress({ model: tag, status: "Download complete!", percent: 100, downloading: false });
       fetchModels();
     } catch (err) {
       setPullProgress(null);
-      setPullError(`Failed to pull ${tag}: ${err instanceof Error ? err.message : String(err)}`);
+      setErrorMessage(`Failed to pull ${tag}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -174,14 +195,16 @@ export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaH
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
+        redirect: "error",
         signal: AbortSignal.timeout(10000),
       });
-      if (res.ok) {
-        fetchModels();
-        setSelectedIdx((i) => Math.max(0, i - 1));
+      if (!res.ok) {
+        setErrorMessage(`Failed to delete ${name}: HTTP ${res.status}`);
+        return;
       }
-    } catch {
-      // ignore
+      await fetchModels();
+    } catch (err) {
+      setErrorMessage(`Failed to delete ${name}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -229,10 +252,18 @@ export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaH
       )}
 
       {/* Error */}
-      {pullError && (
+      {errorMessage && (
         <Text>
           <Text dimColor>{"  "}</Text>
-          <Text color="red">{`\u2717 ${pullError}`}</Text>
+          <Text color="red">{`\u2717 ${errorMessage}`}</Text>
+        </Text>
+      )}
+
+      {/* Delete confirmation */}
+      {pendingDelete !== null && (
+        <Text>
+          <Text dimColor>{"  "}</Text>
+          <Text color="yellow">{`Delete ${pendingDelete}? [y/N]`}</Text>
         </Text>
       )}
 
@@ -295,9 +326,6 @@ export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaH
           <Text>
             <Text dimColor>{"  Active: "}</Text>
             <Text color="green" bold>{snapshot.activeModel}</Text>
-            {snapshot.tokensPerSec !== null && snapshot.tokensPerSec > 0 && (
-              <Text dimColor>{` (${snapshot.tokensPerSec.toFixed(1)} tok/s)`}</Text>
-            )}
           </Text>
         </Box>
       )}

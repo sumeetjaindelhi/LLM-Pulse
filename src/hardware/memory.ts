@@ -20,9 +20,12 @@ export async function detectMemory(): Promise<MemoryInfo> {
   // HOST memory, not the container's slice.
   if (cgroup.limitBytes !== null && cgroup.limitBytes < totalBytes) {
     totalBytes = cgroup.limitBytes;
-    // The kernel's "available" number includes reclaimable pagecache etc.
-    // from outside the container view; clamp it to the container ceiling.
-    if (availableBytes > totalBytes) availableBytes = totalBytes;
+    // The host's "available" figure knows nothing about the container's own
+    // usage; the container can only grow into what is left under its limit.
+    availableBytes = Math.max(
+      0,
+      Math.min(availableBytes, totalBytes - (cgroup.usageBytes ?? 0)),
+    );
   }
 
   const totalMb = Math.round(totalBytes / (1024 * 1024));

@@ -183,8 +183,9 @@ const OFFLOAD_KV_HEADROOM = 0.9;
 const QUALITY_TIE_EPSILON = 0.005;
 
 // llama.cpp community heuristic — buy the most quality you can afford in VRAM,
-// since gains at the high end are real but diminishing. Falls back to the best
-// fitting quant when nothing is comfortable. Returns -1 when every quant
+// since gains at the high end are real but diminishing. Prefers comfortable
+// fits, then tight fits (weights still fit the pool), and only then barely
+// fits (weights overflow into CPU offload). Returns -1 when every quant
 // overflows the budget. Ties on retention break to higher bitsPerWeight so the
 // fuller-precision variant wins.
 export function pickSweetSpot(scores: ModelScore[]): number {
@@ -192,7 +193,8 @@ export function pickSweetSpot(scores: ModelScore[]): number {
   if (fitting.length === 0) return -1;
 
   const comfortable = fitting.filter((x) => isComfortable(x.s.fitLevel));
-  const pool = comfortable.length > 0 ? comfortable : fitting;
+  const tight = fitting.filter((x) => x.s.fitLevel === "tight");
+  const pool = comfortable.length > 0 ? comfortable : tight.length > 0 ? tight : fitting;
   return pool.reduce((best, cur) => {
     const delta = cur.s.quantization.qualityRetention - best.s.quantization.qualityRetention;
     if (delta > QUALITY_TIE_EPSILON) return cur;

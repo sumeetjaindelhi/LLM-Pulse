@@ -28,11 +28,12 @@ export async function profileCommand(options: ProfileOptions): Promise<void> {
   // Check Ollama is running
   let isRunning = false;
   try {
-    const res = await fetch(`${baseUrl}/api/version`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`${baseUrl}/api/version`, { signal: AbortSignal.timeout(3000), redirect: "error" });
     isRunning = res.ok;
   } catch { /* not running */ }
 
   if (!isRunning) {
+    process.exitCode = 1;
     spinner?.fail("Ollama is not running");
     if (!silent) {
       console.log(`\n  ${theme.fail("Ollama must be running for profiling.")}`);
@@ -50,6 +51,7 @@ export async function profileCommand(options: ProfileOptions): Promise<void> {
     const picked = await pickOllamaModel(baseUrl);
     model = picked ?? "";
     if (!model) {
+      process.exitCode = 1;
       spinner?.fail("No models available");
       if (!silent) {
         console.log(`\n  ${theme.warning("No models installed in Ollama.")}`);
@@ -97,6 +99,7 @@ export async function profileCommand(options: ProfileOptions): Promise<void> {
   }
 
   if (results.length === 0) {
+    process.exitCode = 1;
     if (!silent) console.log(`\n  ${theme.fail("All prompts failed.")}\n`);
     else console.log(JSON.stringify({ error: "All prompts failed" }));
     return;
@@ -111,18 +114,17 @@ async function runProfiledInference(
   prompt: string,
   contextSize: number,
 ): Promise<ProfileResult | null> {
+  let pollInterval: ReturnType<typeof setInterval> | undefined;
   try {
     const snapshots: HardwareSnapshot[] = [];
     let currentPhase: HardwareSnapshot["phase"] = "idle";
-    let stopPolling = false;
 
     // Take idle snapshot
     const idleSnap = await takeSnapshot("idle");
     snapshots.push(idleSnap);
 
     // Start hardware polling
-    const pollInterval = setInterval(async () => {
-      if (stopPolling) return;
+    pollInterval = setInterval(async () => {
       const snap = await takeSnapshot(currentPhase);
       snapshots.push(snap);
     }, 500);
@@ -143,13 +145,10 @@ async function runProfiledInference(
         options: { num_ctx: contextSize, num_predict: 150 },
       }),
       signal: AbortSignal.timeout(120000),
+      redirect: "error",
     });
 
-    if (!res.ok || !res.body) {
-      stopPolling = true;
-      clearInterval(pollInterval);
-      return null;
-    }
+    if (!res.ok || !res.body) return null;
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -183,9 +182,6 @@ async function runProfiledInference(
     // Take final snapshot
     const finalSnap = await takeSnapshot("complete");
     snapshots.push(finalSnap);
-
-    stopPolling = true;
-    clearInterval(pollInterval);
 
     const totalMs = endTime - startTime;
     const ttftMs = firstTokenTime !== null ? firstTokenTime - startTime : totalMs;
@@ -234,6 +230,9 @@ async function runProfiledInference(
     };
   } catch {
     return null;
+  } finally {
+    // A live interval keeps the process from exiting, so clear it on every path.
+    clearInterval(pollInterval);
   }
 }
 

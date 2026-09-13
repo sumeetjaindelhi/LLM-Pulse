@@ -84,9 +84,9 @@ export function getAllModels(): ModelEntry[] {
   return loadModels();
 }
 
-export function searchModels(query: string): ModelEntry[] {
+export function searchModels(query: string, category: ModelCategory | "all" = "all"): ModelEntry[] {
   const q = query.toLowerCase();
-  return loadModels().filter(
+  return filterByCategory(category).filter(
     (m) =>
       m.name.toLowerCase().includes(q) ||
       m.id.toLowerCase().includes(q) ||

@@ -1,7 +1,11 @@
 import { readFile } from "node:fs/promises";
 
 const CGROUPS_V2_MEMORY_MAX = "/sys/fs/cgroup/memory.max";
+const CGROUPS_V2_MEMORY_CURRENT = "/sys/fs/cgroup/memory.current";
 const CGROUPS_V1_MEMORY_LIMIT = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
+const CGROUPS_V1_MEMORY_USAGE = "/sys/fs/cgroup/memory/memory.usage_in_bytes";
+const CGROUPS_V2_MEMORY_STAT = "/sys/fs/cgroup/memory.stat";
+const CGROUPS_V1_MEMORY_STAT = "/sys/fs/cgroup/memory/memory.stat";
 
 // cgroups v1 reports "no limit" as a kernel sentinel near LONG_MAX — observed
 // values are e.g. 9223372036854771712 (LONG_MAX rounded down to the page
@@ -12,6 +16,8 @@ const UNLIMITED_THRESHOLD_BYTES = 1n << 50n;
 export interface CgroupMemory {
   /** Container memory limit in bytes, or null if unlimited / not in a container. */
   limitBytes: number | null;
+  /** Memory currently charged to the cgroup in bytes, or null if unreadable. */
+  usageBytes: number | null;
   /** Which cgroup version we read from (for diagnostics). */
   source: "v2" | "v1" | "none";
 }
@@ -24,7 +30,23 @@ async function tryRead(path: string): Promise<string | null> {
   }
 }
 
-function parseLimit(raw: string): number | null {
+async function readBytes(path: string): Promise<number | null> {
+  const raw = await tryRead(path);
+  return raw === null ? null : parseBytes(raw);
+}
+
+// The kernel usage counters include page cache, which the kernel reclaims
+// before OOM-killing the container. After reading a multi-GB GGUF that cache
+// alone can approach the limit, so subtract its reclaimable part
+// (inactive_file) and fall back to the raw counter if memory.stat is unreadable.
+async function readUsageBytes(usagePath: string, statPath: string, inactiveFileKey: string): Promise<number | null> {
+  const [usage, stat] = await Promise.all([readBytes(usagePath), tryRead(statPath)]);
+  if (usage === null) return null;
+  const inactiveFile = stat?.match(new RegExp(`^${inactiveFileKey} (\\d+)$`, "m"));
+  return inactiveFile ? Math.max(0, usage - Number(inactiveFile[1])) : usage;
+}
+
+function parseBytes(raw: string): number | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
   if (trimmed === "max") return null; // cgroups v2 string literal
@@ -50,20 +72,27 @@ function parseLimit(raw: string): number | null {
  */
 export async function readCgroupMemoryLimit(): Promise<CgroupMemory> {
   if (process.platform !== "linux") {
-    return { limitBytes: null, source: "none" };
+    return { limitBytes: null, usageBytes: null, source: "none" };
   }
 
   const v2 = await tryRead(CGROUPS_V2_MEMORY_MAX);
   if (v2 !== null) {
-    const limit = parseLimit(v2);
-    return { limitBytes: limit, source: "v2" };
+    return {
+      limitBytes: parseBytes(v2),
+      usageBytes: await readUsageBytes(CGROUPS_V2_MEMORY_CURRENT, CGROUPS_V2_MEMORY_STAT, "inactive_file"),
+      source: "v2",
+    };
   }
 
   const v1 = await tryRead(CGROUPS_V1_MEMORY_LIMIT);
   if (v1 !== null) {
-    const limit = parseLimit(v1);
-    return { limitBytes: limit, source: "v1" };
+    return {
+      limitBytes: parseBytes(v1),
+      // usage_in_bytes is hierarchical, so pair it with the hierarchical stat.
+      usageBytes: await readUsageBytes(CGROUPS_V1_MEMORY_USAGE, CGROUPS_V1_MEMORY_STAT, "total_inactive_file"),
+      source: "v1",
+    };
   }
 
-  return { limitBytes: null, source: "none" };
+  return { limitBytes: null, usageBytes: null, source: "none" };
 }

@@ -43,6 +43,7 @@ export async function benchmarkCommand(options: BenchmarkOptions): Promise<void>
   try {
     const res = await fetch(`${baseUrl}/api/version`, {
       signal: AbortSignal.timeout(3000),
+      redirect: "error",
     });
     isRunning = res.ok;
   } catch {
@@ -50,6 +51,7 @@ export async function benchmarkCommand(options: BenchmarkOptions): Promise<void>
   }
 
   if (!isRunning) {
+    process.exitCode = 1;
     spinner?.fail("Ollama is not running");
     if (!silent) {
       console.log(`\n  ${theme.fail("Ollama must be running for benchmarks.")}`);
@@ -68,6 +70,7 @@ export async function benchmarkCommand(options: BenchmarkOptions): Promise<void>
     const picked = await pickOllamaModel(baseUrl);
     model = picked ?? "";
     if (!model) {
+      process.exitCode = 1;
       spinner?.fail("No models available");
       if (!silent) {
         console.log(`\n  ${theme.warning("No models installed in Ollama.")}`);
@@ -115,6 +118,7 @@ export async function benchmarkCommand(options: BenchmarkOptions): Promise<void>
   }
 
   if (results.length === 0) {
+    process.exitCode = 1;
     if (!silent) console.log(`\n  ${theme.fail("All rounds failed. Check Ollama logs.")}\n`);
     else console.log(isJson ? JSON.stringify({ error: "All rounds failed" }) : "");
     return;
@@ -185,6 +189,7 @@ async function runInference(baseUrl: string, model: string, prompt: string): Pro
         options: { num_predict: 100 },
       }),
       signal: AbortSignal.timeout(60000),
+      redirect: "error",
     });
 
     if (!res.ok || !res.body) return null;

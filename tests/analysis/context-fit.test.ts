@@ -121,6 +121,14 @@ describe("checkContextFit", () => {
     expect(r.affordedByVramTokens).toBe(0);
     expect(r.verdict).toBe("no");
     expect(r.limitedBy).toBe("hardware");
+    expect(r.remedy).toBe("Q4_K_M weights alone exceed the memory pool — use a smaller quant or model.");
+  });
+
+  it("tells the caller to lower the response reserve when it alone fills the ceiling", () => {
+    // afforded 35,840 tokens (see first test); a 40,000-token reserve leaves no room for any prompt
+    const r = checkContextFit(makeModel(), gpuProfile(10240), { promptTokens: 100, responseTokens: 40000 });
+    expect(r.verdict).toBe("no");
+    expect(r.remedy).toBe("Response reserve (40,000 tokens) leaves no room in the 35,840-token ceiling — lower the response reserve.");
   });
 
   it("clamps the smaller-quant remedy to the native window, not raw VRAM capacity", () => {

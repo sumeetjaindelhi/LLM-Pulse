@@ -21,15 +21,28 @@ function quantOf(model: ModelEntry, name: string): QuantizationVariant {
 }
 
 describe("kvCacheMbPer1kTokens", () => {
+  const withParams = (parametersBillion: number): ModelEntry => ({ ...llama8b, parametersBillion });
+
   it("maps param-count buckets to fp16 KV-cache MB per 1k tokens", () => {
-    expect(kvCacheMbPer1kTokens(1.5)).toBe(40);
-    expect(kvCacheMbPer1kTokens(4)).toBe(80);
-    expect(kvCacheMbPer1kTokens(8)).toBe(150);
-    expect(kvCacheMbPer1kTokens(15)).toBe(210);
-    expect(kvCacheMbPer1kTokens(22)).toBe(280);
-    expect(kvCacheMbPer1kTokens(35)).toBe(360);
-    expect(kvCacheMbPer1kTokens(80)).toBe(440);
-    expect(kvCacheMbPer1kTokens(81)).toBe(600);
+    expect(kvCacheMbPer1kTokens(withParams(1.5))).toBe(40);
+    expect(kvCacheMbPer1kTokens(withParams(4))).toBe(80);
+    expect(kvCacheMbPer1kTokens(withParams(8))).toBe(150);
+    expect(kvCacheMbPer1kTokens(withParams(15))).toBe(210);
+    expect(kvCacheMbPer1kTokens(withParams(22))).toBe(280);
+    expect(kvCacheMbPer1kTokens(withParams(35))).toBe(360);
+    expect(kvCacheMbPer1kTokens(withParams(80))).toBe(440);
+    expect(kvCacheMbPer1kTokens(withParams(81))).toBe(600);
+  });
+
+  it("uses the model's architecture-derived kvMbPer1kTokens over the bucket", () => {
+    expect(kvCacheMbPer1kTokens({ ...withParams(3.8), kvMbPer1kTokens: 375 })).toBe(375);
+  });
+
+  it("carries real KV sizes for curated non-GQA models the bucket underestimates", () => {
+    // phi-3-mini: 32 layers x 32 KV heads x 96 head_dim x 4 bytes = 375 MiB / 1k tokens
+    expect(kvCacheMbPer1kTokens(getModelById("phi-3-mini")!)).toBeGreaterThanOrEqual(375);
+    // codellama-7b: 32 x 32 x 128 x 4 bytes = 500 MiB / 1k tokens
+    expect(kvCacheMbPer1kTokens(getModelById("codellama-7b")!)).toBeGreaterThanOrEqual(500);
   });
 });
 

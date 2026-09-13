@@ -9,11 +9,14 @@ import { OLLAMA_API_URL, LMSTUDIO_API_URL } from "./constants.js";
 // trip an "Invalid config" warning on an older llm-pulse binary. Trade-off:
 // typos in known keys (e.g. `ollamHost`) are silently ignored. The tool's
 // existing documented keys are the surface users should reach for.
+export const OUTPUT_FORMATS = ["table", "json", "csv"] as const;
+export const CATEGORY_FILTERS = ["general", "coding", "reasoning", "creative", "multilingual", "all"] as const;
+
 const ConfigSchema = z.object({
   ollamaHost: z.string().url().optional(),
   lmstudioHost: z.string().url().optional(),
-  defaultFormat: z.enum(["table", "json", "csv"]).optional(),
-  defaultCategory: z.enum(["general", "coding", "reasoning", "creative", "multilingual", "all"]).optional(),
+  defaultFormat: z.enum(OUTPUT_FORMATS).optional(),
+  defaultCategory: z.enum(CATEGORY_FILTERS).optional(),
   defaultTop: z.number().int().min(1).max(50).optional(),
 }).passthrough();
 

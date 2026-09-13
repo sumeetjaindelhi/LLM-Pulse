@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, realpathSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import { z } from "zod";
@@ -106,21 +107,9 @@ export function readCache<T>(
 export function writeCache<T>(name: string, data: T, opts: CacheOptions): void {
   const root = opts.root ?? DEFAULT_ROOT;
   const path = cachePath(name, root);
+  let tempPath: string | undefined;
   try {
     mkdirSync(root, { recursive: true });
-
-    // If a pre-existing entry at this path is a symlink pointing outside our
-    // cache dir, remove it before writing — otherwise writeFileSync would
-    // follow the link and overwrite some other file.
-    try {
-      const existing = realpathSync(path);
-      const canonicalRoot = realpathSync(root);
-      if (!existing.startsWith(canonicalRoot + sep)) {
-        unlinkSync(path);
-      }
-    } catch {
-      // path didn't exist or couldn't be resolved — fine, writeFileSync will create it
-    }
 
     const envelope = {
       timestamp: Date.now(),
@@ -128,11 +117,24 @@ export function writeCache<T>(name: string, data: T, opts: CacheOptions): void {
       version: opts.version ?? 1,
       data,
     };
-    writeFileSync(path, JSON.stringify(envelope));
+    // Never write through whatever sits at `path`: a planted symlink (even a
+    // dangling one) would redirect the write outside the cache root. "wx"
+    // refuses to open an existing temp path, and rename replaces the entry
+    // itself rather than following it — which also makes the write atomic.
+    tempPath = `${path}.${randomUUID()}.tmp`;
+    writeFileSync(tempPath, JSON.stringify(envelope), { flag: "wx" });
+    renameSync(tempPath, path);
   } catch {
     // Cache writes are best-effort. If the filesystem rejects us (read-only
     // container, quota, perms), the feature still works — we just refetch
-    // next time.
+    // next time. Don't leave a (possibly partial) temp file behind.
+    if (tempPath) {
+      try {
+        unlinkSync(tempPath);
+      } catch {
+        // Never created, or already gone.
+      }
+    }
   }
 }
 

@@ -1,6 +1,32 @@
-import { describe, it, expect } from "vitest";
-import { toContextFitCsv } from "../../src/cli/commands/context-fit.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+
+vi.mock("../../src/hardware/index.js", async () => ({
+  detectHardware: async () => (await import("../fixtures/hardware-profiles/high-end-nvidia.json")).default,
+}));
+
+import { contextFitCommand, toContextFitCsv } from "../../src/cli/commands/context-fit.js";
 import type { ContextFitResult } from "../../src/core/types.js";
+
+describe("contextFitCommand exit code", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    process.exitCode = undefined;
+  });
+
+  it("json: an unknown --quant prints the error payload and exits 1", async () => {
+    const stdout: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args) => { stdout.push(args.join(" ")); });
+    await contextFitCommand("llama3.1:8b", { promptTokens: 1000, responseTokens: 0, quant: "Q9_Z", format: "json" });
+    expect(JSON.parse(stdout.join("\n")).availableQuantizations).toContain("Q4_K_M");
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("leaves the exit code alone on success", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await contextFitCommand("llama3.1:8b", { promptTokens: 1000, responseTokens: 0, format: "json" });
+    expect(process.exitCode).toBeUndefined();
+  });
+});
 
 function result(over: Partial<ContextFitResult> = {}): ContextFitResult {
   return {

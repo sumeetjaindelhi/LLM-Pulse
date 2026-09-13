@@ -32,11 +32,14 @@ interface RenderOptions {
   showBrowseHint?: boolean;
 }
 
-// Logs the "model not found" error to stdout. In silent mode emits the JSON
-// payload; otherwise renders the coloured "Did you mean / Browse all models"
-// block. Variations exist because `compare` shows fewer suggestions and uses
-// the model id (since users are comparing curated entries, not pulling tags).
+// Logs the "model not found" error to stdout and marks the CLI run as failed
+// (exit code 1). In silent mode emits the JSON payload; otherwise renders the
+// coloured "Did you mean / Browse all models" block. Variations exist because
+// `compare` shows fewer suggestions and uses the model id (since users are
+// comparing curated entries, not pulling tags). CLI-only: the MCP server uses
+// modelNotFoundPayload so a tool call never touches the process exit code.
 export function renderModelNotFound(modelArg: string, options: RenderOptions = {}): void {
+  process.exitCode = 1;
   const limit = options.suggestionsLimit ?? 5;
   const payload = modelNotFoundPayload(modelArg, limit);
 

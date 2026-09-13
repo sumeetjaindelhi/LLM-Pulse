@@ -79,6 +79,18 @@ describe("fetchOllamaModels", () => {
     expect(models[2].name).toBe("custom-finetune:latest");
   });
 
+  it("refuses to follow redirects away from the Ollama host", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockOllamaResponse),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchOllamaModels();
+
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: "error" });
+  });
+
   it("returns empty array on fetch error", async () => {
     vi.stubGlobal(
       "fetch",
