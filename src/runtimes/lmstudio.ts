@@ -52,6 +52,7 @@ export async function detectLmStudio(host?: string): Promise<RuntimeInfo> {
     try {
       const response = await fetch(`${baseUrl}/v1/models`, {
         signal: AbortSignal.timeout(3000),
+        redirect: "error",
       });
       if (response.ok) {
         info.status = "running";

@@ -7,14 +7,16 @@ import type { HardwareProfile, ModelEntry, QuantizationVariant } from "../core/t
 export const CONTEXT_COMPUTE_RESERVE_MB = 768;
 export const CONTEXT_RESERVE_FRACTION = 0.05;
 
-// Estimated KV-cache size in MB per 1,000 tokens of context, keyed by parameter
-// count. A precise figure needs the model's n_kv_heads x head_dim and whether it
-// uses grouped-query attention — neither is in the curated DB, which carries only
-// parametersBillion. These values assume modern GQA-era architectures with an
-// fp16 KV cache (Ollama's default) and are set deliberately high: over-estimating
-// KV makes the context estimate err toward "safe" rather than "OOM".
-// Same param-bucket shape as scorer.ts's estimateTotalLayers.
-export function kvCacheMbPer1kTokens(paramsBillion: number): number {
+// Estimated fp16 KV-cache size (Ollama's default) in MB per 1,000 tokens of
+// context. Curated models whose architecture the bucket underestimates — no
+// grouped-query attention, or a large head_dim — carry a figure derived from
+// layers x kv_heads x head_dim in `kvMbPer1kTokens`. Everything else falls back
+// to a parameter-count bucket that assumes a modern GQA architecture and is set
+// deliberately high: over-estimating KV makes the context estimate err toward
+// "safe" rather than "OOM". Same bucket shape as scorer.ts's estimateTotalLayers.
+export function kvCacheMbPer1kTokens(model: ModelEntry): number {
+  if (model.kvMbPer1kTokens !== undefined) return model.kvMbPer1kTokens;
+  const paramsBillion = model.parametersBillion;
   if (paramsBillion <= 1.5) return 40;
   if (paramsBillion <= 4) return 80;
   if (paramsBillion <= 9) return 150;
@@ -38,6 +40,6 @@ export function maxContextTokensForVram(
   const budgetMb = getAvailableVram(hardware);
   const reserveMb = Math.max(CONTEXT_COMPUTE_RESERVE_MB, budgetMb * CONTEXT_RESERVE_FRACTION);
   const kvBudgetMb = budgetMb - quant.vramMb - reserveMb;
-  const kvPer1k = kvCacheMbPer1kTokens(model.parametersBillion);
+  const kvPer1k = kvCacheMbPer1kTokens(model);
   return Math.max(0, Math.floor((kvBudgetMb / kvPer1k) * 1000));
 }

@@ -20,12 +20,18 @@ const SMI_RETRY = {
   },
 } as const;
 
-interface NvidiaSmiResult {
+interface NvidiaGpuStats {
   vramTotalMb: number;
   vramUsedMb: number;
   utilizationPercent: number;
   temperatureCelsius: number;
   driverVersion: string;
+}
+
+interface NvidiaSmiResult {
+  // One entry per nvidia-smi row, in the order nvidia-smi reports them; null
+  // for a row that could not be parsed, so row positions stay aligned.
+  gpus: (NvidiaGpuStats | null)[];
   cudaVersion: string;
 }
 
@@ -41,45 +47,6 @@ export interface RocmGpuStats {
   vramUsedMb: number;
   utilizationPercent: number;
   temperatureCelsius: number;
-}
-
-// ── ROCm CSV parser (legacy / fallback) ───────────────────────────────
-// Old `rocm-smi --csv` output path. ROCm 5.x emits field names like
-// "VRAM Total Memory (B)". ROCm 6.x+ ships `--json` which is more stable,
-// but we keep this parser as a fallback when --json returns empty or is
-// unsupported by the installed rocm-smi version.
-
-/** Shared CSV parser for rocm-smi legacy output. Returns ONE GPU's aggregate.
- *  On multi-GPU boxes, this collapses stats across cards (each row is
- *  processed, the last one wins). Prefer parseRocmJsonOutput for multi-GPU.
- */
-export function parseRocmCsv(stdout: string): RocmGpuStats {
-  let vramTotalMb = 0;
-  let vramUsedMb = 0;
-  let utilizationPercent = 0;
-  let temperatureCelsius = 0;
-
-  for (const line of stdout.trim().split("\n")) {
-    const lower = line.toLowerCase();
-    if (lower.includes("vram total")) {
-      const m = line.match(/([\d.]+)/);
-      if (m) vramTotalMb = Math.round(parseFloat(m[1]) / (1024 * 1024));
-    } else if (lower.includes("vram used")) {
-      const m = line.match(/([\d.]+)/);
-      if (m) vramUsedMb = Math.round(parseFloat(m[1]) / (1024 * 1024));
-    } else if (lower.includes("gpu use") || lower.includes("gpu utilization")) {
-      // ROCm 6.x emits floats here (e.g. "73.5"). parseInt would silently
-      // truncate the fraction; the JSON path uses parseFloat — keep them in
-      // sync so the same metric reports the same precision either way.
-      const m = line.match(/([\d.]+)\s*%?/);
-      if (m) utilizationPercent = Math.round(parseFloat(m[1]));
-    } else if (lower.includes("temperature") || lower.includes("temp")) {
-      const m = line.match(/([\d.]+)\s*c?/i);
-      if (m) temperatureCelsius = parseFloat(m[1]);
-    }
-  }
-
-  return { vramTotalMb, vramUsedMb, utilizationPercent, temperatureCelsius };
 }
 
 // ── ROCm JSON parser (preferred; ROCm 5.5+) ──────────────────────────
@@ -124,6 +91,22 @@ function pickNumber(values: (string | undefined)[]): number {
   return 0;
 }
 
+function toRocmGpuStats(gpu: z.infer<typeof RocmJsonGpu>): RocmGpuStats {
+  return {
+    vramTotalMb: pickBytesToMb([gpu["VRAM Total Memory (B)"], gpu["VRAM Total (B)"]]),
+    vramUsedMb: pickBytesToMb([
+      gpu["VRAM Total Used Memory (B)"],
+      gpu["VRAM Total Used (B)"],
+    ]),
+    utilizationPercent: Math.round(pickNumber([gpu["GPU use (%)"]])),
+    temperatureCelsius: pickNumber([
+      gpu["Temperature (Sensor edge) (C)"],
+      gpu["Temperature (Sensor junction) (C)"],
+      gpu["Temperature (C)"],
+    ]),
+  };
+}
+
 export function parseRocmJsonOutput(stdout: string): RocmGpuStats[] {
   let raw: unknown;
   try {
@@ -134,28 +117,44 @@ export function parseRocmJsonOutput(stdout: string): RocmGpuStats[] {
   const parsed = RocmJsonSchema.safeParse(raw);
   if (!parsed.success) return [];
 
-  const out: RocmGpuStats[] = [];
   // Sort by card index so results are stable across invocations
-  const entries = Object.entries(parsed.data)
+  return Object.entries(parsed.data)
     .filter(([k]) => /^card\d+$/.test(k))
-    .sort(([a], [b]) => parseInt(a.slice(4), 10) - parseInt(b.slice(4), 10));
+    .sort(([a], [b]) => parseInt(a.slice(4), 10) - parseInt(b.slice(4), 10))
+    .map(([, gpu]) => toRocmGpuStats(gpu));
+}
 
-  for (const [, gpu] of entries) {
-    out.push({
-      vramTotalMb: pickBytesToMb([gpu["VRAM Total Memory (B)"], gpu["VRAM Total (B)"]]),
-      vramUsedMb: pickBytesToMb([
-        gpu["VRAM Total Used Memory (B)"],
-        gpu["VRAM Total Used (B)"],
-      ]),
-      utilizationPercent: Math.round(pickNumber([gpu["GPU use (%)"]])),
-      temperatureCelsius: pickNumber([
-        gpu["Temperature (Sensor edge) (C)"],
-        gpu["Temperature (Sensor junction) (C)"],
-        gpu["Temperature (C)"],
-      ]),
-    });
+// ── ROCm CSV parser (fallback for rocm-smi builds without --json) ────
+// `rocm-smi --csv` prints a header row with the same field names the JSON
+// output uses, then one row per card:
+//   device,Temperature (Sensor edge) (C),GPU use (%),VRAM Total Memory (B),…
+//   card0,45.0,12,17163091968,…
+export function parseRocmCsv(stdout: string): RocmGpuStats[] {
+  const [header, ...rows] = stdout.trim().split("\n");
+  const columns = header.split(",").map((c) => c.trim());
+  return rows
+    .map((row) => row.split(",").map((v) => v.trim()))
+    .filter((values) => /^card\d+$/.test(values[0]))
+    .map((values) =>
+      toRocmGpuStats(Object.fromEntries(columns.map((column, i) => [column, values[i]]))),
+    );
+}
+
+const ROCM_STAT_ARGS = ["--showmeminfo", "vram", "--showtemp", "--showuse"];
+
+/** Per-card rocm-smi stats. Tries --json first (per-GPU, version-independent
+ *  field set) and falls back to --csv for rocm-smi builds without --json.
+ */
+export async function readRocmGpuStats(): Promise<RocmGpuStats[]> {
+  try {
+    const { stdout } = await execa("rocm-smi", [...ROCM_STAT_ARGS, "--json"], { timeout: 5000 });
+    const gpus = parseRocmJsonOutput(stdout);
+    if (gpus.length > 0) return gpus;
+  } catch {
+    // old rocm-smi or transient failure — try CSV
   }
-  return out;
+  const { stdout } = await execa("rocm-smi", [...ROCM_STAT_ARGS, "--csv"], { timeout: 5000 });
+  return parseRocmCsv(stdout);
 }
 
 async function parseNvidiaSmi(): Promise<NvidiaSmiResult | null> {
@@ -178,55 +177,34 @@ async function parseNvidiaSmi(): Promise<NvidiaSmiResult | null> {
       // ignore
     }
 
-    const line = stdout.trim().split("\n")[0]; // First GPU
-    const [vramTotal, vramUsed, utilization, temp, driver] = line
-      .split(",")
-      .map((s) => s.trim());
+    const gpus = stdout.trim().split("\n").map((line) => {
+      const [vramTotal, vramUsed, utilization, temp, driver] = line
+        .split(",")
+        .map((s) => s.trim());
 
-    const vramTotalMb = parseInt(vramTotal, 10);
-    const vramUsedMb = parseInt(vramUsed, 10);
-    if (isNaN(vramTotalMb) || isNaN(vramUsedMb)) {
+      const vramTotalMb = parseInt(vramTotal, 10);
+      const vramUsedMb = parseInt(vramUsed, 10);
+      if (isNaN(vramTotalMb) || isNaN(vramUsedMb)) return null;
+
+      return {
+        vramTotalMb,
+        vramUsedMb,
+        utilizationPercent: parseInt(utilization, 10) || 0,
+        temperatureCelsius: parseInt(temp, 10) || 0,
+        driverVersion: driver,
+      };
+    });
+    if (gpus.every((g) => g === null)) {
       throw new Error("nvidia-smi returned unparseable output");
     }
 
-    return {
-      vramTotalMb,
-      vramUsedMb,
-      utilizationPercent: parseInt(utilization, 10) || 0,
-      temperatureCelsius: parseInt(temp, 10) || 0,
-      driverVersion: driver,
-      cudaVersion,
-    };
+    return { gpus, cudaVersion };
   }, SMI_RETRY);
 }
 
 async function parseRocmSmi(): Promise<RocmSmiResult | null> {
   return retry(async () => {
-    // Try --json first: per-GPU, version-independent field set. If the
-    // installed rocm-smi doesn't support --json (very old 4.x), we fall
-    // through to the CSV path.
-    let gpus: RocmGpuStats[] = [];
-    try {
-      const { stdout: jsonOut } = await execa(
-        "rocm-smi",
-        ["--showmeminfo", "vram", "--showtemp", "--showuse", "--json"],
-        { timeout: 5000 },
-      );
-      gpus = parseRocmJsonOutput(jsonOut);
-    } catch {
-      // old rocm-smi or transient failure — retry with CSV
-    }
-
-    if (gpus.length === 0) {
-      const { stdout } = await execa(
-        "rocm-smi",
-        ["--showmeminfo", "vram", "--showtemp", "--showuse", "--csv"],
-        { timeout: 5000 },
-      );
-      const single = parseRocmCsv(stdout);
-      if (single.vramTotalMb > 0) gpus = [single];
-    }
-
+    const gpus = await readRocmGpuStats();
     if (gpus.length === 0 || gpus.every((g) => g.vramTotalMb === 0)) {
       throw new Error("rocm-smi returned no usable GPU stats");
     }
@@ -267,6 +245,7 @@ export async function detectGpus(): Promise<GpuInfo[]> {
   ]);
 
   const gpus: GpuInfo[] = [];
+  let nvidiaIndex = 0;
   let amdIndex = 0;
 
   for (const controller of graphics.controllers) {
@@ -279,17 +258,25 @@ export async function detectGpus(): Promise<GpuInfo[]> {
     const isApple = vendor === "Apple";
     const isIntel = vendor === "Intel";
 
-    if (isNvidia && nvidiaSmi) {
+    // Multi-NVIDIA: same controller-to-row matching as the AMD path below. A
+    // row nvidia-smi could not report on sends that controller down the
+    // generic path instead of borrowing another card's stats.
+    const stats = isNvidia && nvidiaSmi
+      ? (nvidiaIndex < nvidiaSmi.gpus.length ? nvidiaSmi.gpus[nvidiaIndex] : nvidiaSmi.gpus[0])
+      : null;
+    if (isNvidia) nvidiaIndex++;
+
+    if (isNvidia && nvidiaSmi && stats) {
       gpus.push({
         vendor,
         model: controller.model,
-        vramMb: nvidiaSmi.vramTotalMb,
-        driverVersion: nvidiaSmi.driverVersion,
+        vramMb: stats.vramTotalMb,
+        driverVersion: stats.driverVersion,
         acceleratorVersion: nvidiaSmi.cudaVersion || null,
         acceleratorType: "cuda",
-        utilizationPercent: nvidiaSmi.utilizationPercent,
-        temperatureCelsius: nvidiaSmi.temperatureCelsius,
-        vramUsedMb: nvidiaSmi.vramUsedMb,
+        utilizationPercent: stats.utilizationPercent,
+        temperatureCelsius: stats.temperatureCelsius,
+        vramUsedMb: stats.vramUsedMb,
       });
     } else if (isAmd && rocmSmi) {
       // Multi-AMD: match each controller to the next per-GPU row from
@@ -328,13 +315,16 @@ export async function detectGpus(): Promise<GpuInfo[]> {
       });
     } else {
       // Generic path: Apple Metal, Intel iGPU, anything we don't have a
-      // specialized probe for. For Intel iGPUs, vramMb stays 0 and the
-      // scorer falls back to CPU/RAM — correct behaviour (iGPUs share
-      // system RAM, not dedicated VRAM).
+      // specialized probe for. Intel iGPUs share system RAM; the aperture size
+      // systeminformation reports for them is not usable VRAM, so vramMb is 0
+      // and the scorer falls back to CPU/RAM. Discrete Arc cards (A/B-series
+      // model numbers, e.g. A770, B580) have no sysfs figure off Linux but do
+      // report real dedicated VRAM, so keep it. Arc-branded iGPUs ("Arc
+      // Graphics", "Arc 140V") carry no such number.
       gpus.push({
         vendor,
         model: controller.model,
-        vramMb: controller.vram || 0,
+        vramMb: isIntel && !/\bArc\b.*\b[AB]\d{3}M?\b/i.test(controller.model) ? 0 : controller.vram || 0,
         driverVersion: controller.driverVersion || "",
         acceleratorVersion: null,
         acceleratorType: isApple ? "metal" : null,

@@ -155,6 +155,7 @@ async function runFixes(fixes: FixAction[]): Promise<void> {
         try {
           const res = await fetch(`${resolveOllamaHost()}/api/version`, {
             signal: AbortSignal.timeout(3000),
+            redirect: "error",
           });
           if (res.ok) {
             spinner.succeed(`${fix.label}: Ollama is now running`);

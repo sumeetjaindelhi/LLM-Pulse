@@ -14,6 +14,7 @@ export async function fetchOllamaModels(host?: string): Promise<OllamaModel[]> {
   try {
     const response = await fetch(`${baseUrl}/api/tags`, {
       signal: AbortSignal.timeout(3000),
+      redirect: "error",
     });
 
     if (!response.ok) return [];

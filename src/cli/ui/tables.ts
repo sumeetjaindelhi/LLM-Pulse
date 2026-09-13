@@ -34,7 +34,7 @@ export function recommendationTable(
 
   const table = new Table({
     head: headCols,
-    style: { head: [], border: ["gray"], compact: true },
+    style: { head: [], border: [], compact: true },
     chars: borderlessTableChars,
   });
 
@@ -82,7 +82,7 @@ export function comparisonTable(
 
   const table = new Table({
     head: headerRow,
-    style: { head: [], border: ["gray"], compact: true },
+    style: { head: [], border: [], compact: true },
     chars: borderlessTableChars,
   });
 

@@ -75,7 +75,7 @@ export function recommendContext(
 
   let note: string;
   if (maxCtxByVram < MIN_CONTEXT) {
-    note = "VRAM tight — little ctx room";
+    note = "KV cache exceeds VRAM at 2048 — expect CPU offload";
   } else if (chosen >= model.contextWindow) {
     note = "capped at native context";
   } else {
@@ -136,6 +136,9 @@ export function computeOptimization(
   }
 
   const fitLevel = classifyFit(getAvailableVram(hardware), quant.vramMb);
+  // The weights can fit comfortably while the KV cache for the 2048 floor does
+  // not; the batch spike then lands on an already-overcommitted pool.
+  const kvOverBudgetAtFloor = maxContextTokensForVram(model, quant, hardware) < MIN_CONTEXT;
 
   return {
     quant,
@@ -144,6 +147,6 @@ export function computeOptimization(
     numCtx: recommendContext(model, quant, hardware),
     numGpu: recommendGpuLayers(model, quant, hardware),
     numThread: recommendThreads(hardware.cpu),
-    numBatch: recommendBatch(fitLevel),
+    numBatch: recommendBatch(kvOverBudgetAtFloor ? "tight" : fitLevel),
   };
 }

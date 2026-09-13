@@ -20,7 +20,7 @@ export function fitBadge(level: FitLevel): string {
   }
 }
 
-const SEVERITY_ICONS: Record<CheckSeverity, string> = {
+export const SEVERITY_ICONS: Record<CheckSeverity, string> = {
   pass: "✓",
   warning: "⚠",
   fail: "✗",

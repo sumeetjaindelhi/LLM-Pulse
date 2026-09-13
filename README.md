@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/llm-pulse.svg)](https://www.npmjs.com/package/llm-pulse)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20.5-brightgreen.svg)](https://nodejs.org/)
 
 Zero-config CLI that tells you what LLMs your PC can run. Scans hardware, finds runtimes, recommends models.
 
@@ -20,7 +20,7 @@ npx llm-pulse
 npm install -g llm-pulse
 ```
 
-Requires Node.js 18+.
+Requires Node.js 20.5+.
 
 ## Commands
 
@@ -40,6 +40,8 @@ llm-pulse --category coding --top 3  # Top 3 coding models
 | `-c, --category` | `general`, `coding`, `reasoning`, `creative`, `multilingual` | `all` |
 | `-t, --top <n>` | Number of recommendations | `5` |
 | `-H, --host <url>` | Ollama API host URL | `http://127.0.0.1:11434` |
+
+Invalid flag values are rejected rather than silently replaced — e.g. `--format yaml`, `--category bogus`, or `--top 50k` print an error and exit 1. Commands that report an error exit 1 too — e.g. model not found, or Ollama not running for `benchmark` / `profile`.
 
 ### `llm-pulse check <model>`
 
@@ -98,6 +100,26 @@ llm-pulse context-fit llama3.1:8b --prompt-tokens 50000 --response-tokens 1024  
 llm-pulse context-fit llama3.1:8b --prompt-tokens 50000 --format json
 ```
 
+### `llm-pulse report`
+
+Paste-ready markdown summary of your machine — hardware, runtimes, health score, and the top recommended models — for GitHub issues, Reddit, or Discord.
+
+```bash
+llm-pulse report > my-rig.md                  # save to a file
+llm-pulse report | pbcopy                     # copy to the clipboard (macOS)
+llm-pulse report --category coding --top 3    # top 3 coding models
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `-c, --category` | `general`, `coding`, `reasoning`, `creative`, `multilingual` | `all` |
+| `-t, --top <n>` | Number of recommendations | `5` |
+| `-H, --host <url>` | Ollama API host URL | `http://127.0.0.1:11434` |
+
+Output is always GitHub-flavoured markdown on stdout — no colour, no spinner — so it redirects and pipes cleanly. Discord does not render markdown tables; wrap the paste in a ```` ``` ```` code fence there.
+
+**Privacy:** the report shares your CPU and GPU model, accelerator version (e.g. CUDA), RAM size/type/speed, disk type and free space, runtime versions and installed-model counts, the `doctor` health checks, and your OS/architecture. It never prints runtime install paths, installed model names, or the Ollama host URL.
+
 ### `llm-pulse doctor`
 
 System health check — scores your setup and gives suggestions.
@@ -117,7 +139,7 @@ Browse the model database filtered for your hardware. Pulls in the live ollama.c
 
 ```bash
 llm-pulse models                      # Curated set (48 models)
-llm-pulse models --library            # Full Ollama library (245+ models)
+llm-pulse models --library            # Full Ollama library (240+ models)
 llm-pulse models --refresh            # Force refresh library cache
 llm-pulse models --search llama       # Search by name
 llm-pulse models --category coding    # Filter by category
@@ -128,11 +150,10 @@ llm-pulse models --fits               # Only models that fit your VRAM
 
 Live TUI dashboard — like htop for LLMs. Press `Tab` to switch views, `q` to quit.
 
-- **Overview** — CPU/GPU/RAM/VRAM bars with sparklines + smart alerts
-- **Inference** — Throughput chart + session stats
+- **Overview** — CPU/GPU/RAM/VRAM bars with sparklines, the loaded model and its context length, plus smart alerts (VRAM pressure, GPU temperature, no active model)
 - **GPU** — Per-GPU utilization, temperature, VRAM, and power sparklines with peak stats + temperature alerts
 - **VRAM Map** — Visual VRAM breakdown (model weights / KV cache / overhead / free)
-- **Models** — Browse installed Ollama models; pull new ones or delete, from inside the TUI
+- **Models** — Browse installed Ollama models; pull new ones or delete (with a confirmation prompt), from inside the TUI
 
 ```bash
 llm-pulse monitor
@@ -201,7 +222,7 @@ Exposed tools:
 | `recommend` | Ranked model list for your hardware, filterable by category |
 | `doctor` | System health score with actionable suggestions |
 | `models` | Browse / search the model database, optionally filtered to models that fit |
-| `monitor` | One-shot live snapshot — CPU/GPU%, VRAM, temp, power, active Ollama model + tok/s |
+| `monitor` | One-shot live snapshot — CPU/GPU%, VRAM, temp, power, active Ollama model + context length (`tokensPerSec` is always `null`) |
 
 ## Supported
 
@@ -209,11 +230,13 @@ Exposed tools:
 
 **Runtimes:** [Ollama](https://ollama.com), [llama.cpp](https://github.com/ggerganov/llama.cpp), [LM Studio](https://lmstudio.ai)
 
-**Models:** 48 curated + 245+ via live Ollama library catalog (cached 24 h) — across general, coding, reasoning, creative, multilingual — each with Q4/Q5/Q8/F16 quantization variants
+**Models:** 48 curated + 240+ via live Ollama library catalog (cached 24 h) — across general, coding, reasoning, creative, multilingual. Curated models carry 109 quantization variants: Q4_K_M for nearly every model, Q5_K_M / Q8_0 for many, F16 for a few
 
 ## Stability
 
 llm-pulse follows [semantic versioning](https://semver.org). As of **1.0.0**, the CLI commands and flags, the `table`/`json`/`csv` output shapes, the programmatic API (`detectHardware`, `getRecommendations`), and the 7 MCP tools are considered stable — any breaking change to them bumps the major version.
+
+The markdown printed by `llm-pulse report` follows the same rule as `table` output: minor releases may only add to it. Scripts should parse `llm-pulse scan --format json` or `llm-pulse doctor --format json` instead.
 
 ## License
 

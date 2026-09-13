@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Safe string: printable, reasonable length, no control chars
+// Length-capped string (max 256 chars). Content is not checked.
 const safeString = z.string().max(256);
 
 /**
@@ -57,11 +57,11 @@ export const OllamaPsSchema = z.object({
     name: safeString,
     size: z.number().optional(),
     details: z.object({
-      tokens_per_second: z.number().optional(),
       quantization_level: safeString.optional(),
       parameter_size: safeString.optional(),
     }).optional(),
     size_vram: z.number().optional(),
+    context_length: z.number().optional(),
   })).default([]),
 });
 

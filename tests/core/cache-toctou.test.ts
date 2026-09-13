@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -65,10 +65,10 @@ describe("cache security hardening", () => {
     }
   });
 
-  it("removes a pre-existing external symlink before writing", () => {
+  it("replaces a pre-existing external symlink instead of writing through it", () => {
     // Attacker swaps a symlink pointing at /tmp/outside/evil just before our
-    // writeCache runs. Our write path notices the link escapes the cache
-    // root and unlinks it before writing — so the external file is untouched.
+    // writeCache runs. The write goes to a temp file renamed over the link,
+    // so the external file is untouched.
     const targetPath = join(outside, "evil.json");
     writeFileSync(targetPath, "{}");
     const cacheFile = join(root, "trap.json");
@@ -79,5 +79,28 @@ describe("cache security hardening", () => {
     // The external target should remain its original empty-object contents.
     const targetContent = readFileSync(targetPath, "utf-8");
     expect(targetContent).toBe("{}");
+  });
+
+  it("does not create a file through a dangling symlink when writing", () => {
+    // realpath cannot resolve a link whose target does not exist yet, so a
+    // resolve-then-write guard misses it and the write creates the target.
+    const targetPath = join(outside, "created-by-us.json");
+    const cacheFile = join(root, "dangling.json");
+    symlinkSync(targetPath, cacheFile);
+
+    writeCache("dangling", [{ id: "ours" }], { root, ttlMs: 60_000 });
+
+    expect(existsSync(targetPath)).toBe(false);
+    expect(readCache<Dummy>("dangling", Dummy, { root, ttlMs: 60_000 })?.data).toEqual([{ id: "ours" }]);
+  });
+
+  it("removes its temp file when the rename fails", () => {
+    // A directory at the cache path makes renameSync fail after the temp
+    // file has been written.
+    mkdirSync(join(root, "blocked.json"));
+
+    writeCache("blocked", [{ id: "ours" }], { root, ttlMs: 60_000 });
+
+    expect(readdirSync(root)).toEqual(["blocked.json"]);
   });
 });

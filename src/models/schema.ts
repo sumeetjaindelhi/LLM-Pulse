@@ -13,6 +13,7 @@ export const ModelEntrySchema = z.object({
   provider: z.string(),
   parametersBillion: z.number(),
   contextWindow: z.number(),
+  kvMbPer1kTokens: z.number().positive().optional(),
   categories: z.array(
     z.enum(["general", "coding", "reasoning", "creative", "multilingual"]),
   ),

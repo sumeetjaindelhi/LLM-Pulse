@@ -167,4 +167,12 @@ describe("model resolution", () => {
       expect(r.name.toLowerCase() + r.id.toLowerCase() + r.provider.toLowerCase()).toContain("llama");
     }
   });
+
+  it("applies the category filter to search results", () => {
+    const all = searchModels("llama");
+    const coding = searchModels("llama", "coding");
+    expect(coding.length).toBeGreaterThan(0);
+    expect(coding.length).toBeLessThan(all.length);
+    expect(coding.every((m) => m.categories.includes("coding"))).toBe(true);
+  });
 });

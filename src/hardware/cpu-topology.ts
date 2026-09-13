@@ -6,20 +6,40 @@ export interface CpuTopology {
   efficiencyCores: number | null;
 }
 
-// Parse a Linux cpus list like "0-7" or "0,2,4-6" into the count of listed CPUs.
-function countCpusInList(list: string): number {
-  let total = 0;
+// Parse a Linux cpus list like "0-7" or "0,2,4-6" into the listed CPU indices.
+function parseCpuList(list: string): number[] {
+  const cpus: number[] = [];
   for (const part of list.trim().split(",")) {
     const trimmed = part.trim();
     if (!trimmed) continue;
     if (trimmed.includes("-")) {
       const [a, b] = trimmed.split("-").map((n) => parseInt(n, 10));
-      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) total += b - a + 1;
+      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) {
+        for (let cpu = a; cpu <= b; cpu++) cpus.push(cpu);
+      }
     } else {
-      if (Number.isFinite(parseInt(trimmed, 10))) total += 1;
+      const cpu = parseInt(trimmed, 10);
+      if (Number.isFinite(cpu)) cpus.push(cpu);
     }
   }
-  return total;
+  return cpus;
+}
+
+// Count physical cores behind a set of logical CPUs. SMT siblings share one
+// core_cpus_list (thread_siblings_list on kernels older than 5.x), so the
+// number of distinct lists is the core count whether or not SMT is present.
+// Returns null when any CPU's topology is unreadable.
+async function countPhysicalCores(cpus: number[]): Promise<number | null> {
+  const siblingLists = await Promise.all(
+    cpus.map((cpu) => {
+      const topology = `/sys/devices/system/cpu/cpu${cpu}/topology`;
+      return readFile(`${topology}/core_cpus_list`, "utf-8")
+        .catch(() => readFile(`${topology}/thread_siblings_list`, "utf-8"))
+        .catch(() => null);
+    }),
+  );
+  if (siblingLists.includes(null)) return null;
+  return new Set(siblingLists.map((list) => list?.trim())).size;
 }
 
 async function readDarwinTopology(): Promise<CpuTopology> {
@@ -50,14 +70,14 @@ async function readLinuxTopology(): Promise<CpuTopology> {
     if (pRaw === null && eRaw === null) {
       return { performanceCores: null, efficiencyCores: null };
     }
-    // The `cpus` listing counts logical CPUs. Each hybrid P-core has SMT
-    // (2 threads), E-cores don't. We report physical cores, so halve the
-    // P-core count when both topology entries exist (meaning SMT applies).
-    const pLogical = pRaw !== null ? countCpusInList(pRaw) : 0;
-    const eLogical = eRaw !== null ? countCpusInList(eRaw) : 0;
+    // The `cpus` listing counts logical CPUs. P-cores may or may not have SMT
+    // (Core Ultra 200S drops it), so resolve physical P-cores from per-CPU
+    // topology. E-cores have no SMT, so their logical count is the core count.
+    const pCores = pRaw !== null ? await countPhysicalCores(parseCpuList(pRaw)) : null;
+    const eCores = eRaw !== null ? parseCpuList(eRaw).length : 0;
     return {
-      performanceCores: pLogical > 0 ? Math.max(1, Math.floor(pLogical / 2)) : null,
-      efficiencyCores: eLogical > 0 ? eLogical : null,
+      performanceCores: pCores !== null && pCores > 0 ? pCores : null,
+      efficiencyCores: eCores > 0 ? eCores : null,
     };
   } catch {
     return { performanceCores: null, efficiencyCores: null };

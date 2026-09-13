@@ -4,19 +4,34 @@ import { z } from "zod";
 import { detectHardware } from "../hardware/index.js";
 import { HardwareMonitor } from "../hardware/monitor.js";
 import { detectAllRuntimes } from "../runtimes/index.js";
-import { getAllModels, searchModels, filterByCategory, resolveModel } from "../models/database.js";
+import { searchModels, filterByCategory, resolveModel } from "../models/database.js";
 import { modelNotFoundPayload } from "../cli/ui/errors.js";
-import { fetchOllamaModels, clearOllamaCache } from "../models/ollama-models.js";
+import { clearOllamaCache } from "../models/ollama-models.js";
 import { checkContextFit } from "../analysis/context-fit.js";
 import { getRecommendations } from "../analysis/recommender.js";
 import { scoreModel, deriveVerdict, getAvailableVram, isFitting } from "../analysis/scorer.js";
 import { runDiagnostics } from "../analysis/doctor.js";
-import { resolveOllamaHost } from "../core/config.js";
-import { VERSION } from "../core/constants.js";
+import { resolveOllamaHost, resolveLmStudioHost, CATEGORY_FILTERS } from "../core/config.js";
+import { VERSION, OLLAMA_API_URL, LMSTUDIO_API_URL } from "../core/constants.js";
 import { LocalhostUrl } from "../core/api-schemas.js";
-import type { ModelCategory, QuantizationVariant } from "../core/types.js";
+import type { QuantizationVariant } from "../core/types.js";
 
-const CategoryEnum = z.enum(["general", "coding", "reasoning", "creative", "multilingual", "all"]);
+// The host input is validated by LocalhostUrl, but resolution can still pick up
+// a .llmpulserc in the server's cwd or OLLAMA_HOST. Re-validate the resolved
+// value so the MCP surface never fetches anything off loopback.
+function localhostOr(resolved: string, fallback: string): string {
+  return LocalhostUrl.safeParse(resolved).success ? resolved : fallback;
+}
+
+export function resolveMcpOllamaHost(host?: string): string {
+  return localhostOr(resolveOllamaHost(host), OLLAMA_API_URL);
+}
+
+export function resolveMcpLmStudioHost(): string {
+  return localhostOr(resolveLmStudioHost(), LMSTUDIO_API_URL);
+}
+
+const CategoryEnum = z.enum(CATEGORY_FILTERS);
 
 const server = new McpServer({
   name: "llm-pulse",
@@ -38,11 +53,11 @@ server.tool(
       // cheap). Don't clear the hardware cache — detectHardware has a 60s TTL
       // that handles both chained-tool freshness and long-session drift.
       clearOllamaCache();
-      const ollamaHost = resolveOllamaHost(host);
+      const ollamaHost = resolveMcpOllamaHost(host);
 
       const [hardware, runtimes] = await Promise.all([
         detectHardware(),
-        detectAllRuntimes(ollamaHost),
+        detectAllRuntimes(ollamaHost, resolveMcpLmStudioHost()),
       ]);
 
       const recommendations = getRecommendations(hardware, {
@@ -82,9 +97,9 @@ server.tool(
   {
     model: z.string().describe("Model name, ID, or Ollama tag (e.g. 'llama3.1:8b', 'deepseek-coder-v2')"),
     quant: z.string().optional().describe("Specific quantization to check (e.g. 'Q4_K_M', 'Q8_0')"),
-    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only)"),
+    host: LocalhostUrl.optional().describe("Accepted for compatibility; not used by this tool"),
   },
-  async ({ model: modelArg, quant, host }) => {
+  async ({ model: modelArg, quant }) => {
     try {
       const hardware = await detectHardware();
       const model = resolveModel(modelArg);
@@ -254,7 +269,7 @@ server.tool(
     category: CategoryEnum.optional().default("all").describe("Filter by model category"),
     top: z.number().int().min(1).max(50).optional().default(5).describe("Number of recommendations"),
     onlyFitting: z.boolean().optional().default(true).describe("Exclude models that cannot run on this hardware"),
-    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only)"),
+    host: LocalhostUrl.optional().describe("Accepted for compatibility; not used by this tool"),
   },
   async ({ category, top, onlyFitting }) => {
     try {
@@ -308,11 +323,11 @@ server.tool(
   async ({ host }) => {
     try {
       clearOllamaCache();
-      const ollamaHost = resolveOllamaHost(host);
+      const ollamaHost = resolveMcpOllamaHost(host);
 
       const [hardware, runtimes] = await Promise.all([
         detectHardware(),
-        detectAllRuntimes(ollamaHost),
+        detectAllRuntimes(ollamaHost, resolveMcpLmStudioHost()),
       ]);
 
       const report = runDiagnostics(hardware, runtimes);
@@ -335,12 +350,12 @@ server.tool(
     search: z.string().optional().describe("Search query — matches model name, ID, or provider"),
     category: CategoryEnum.optional().default("all").describe("Filter by model category"),
     fits: z.boolean().optional().default(false).describe("Only show models that fit your hardware (triggers hardware scan)"),
-    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only)"),
+    host: LocalhostUrl.optional().describe("Accepted for compatibility; not used by this tool"),
   },
   async ({ search, category, fits }) => {
     try {
       // Resolve models from database
-      const models = search ? searchModels(search) : filterByCategory(category);
+      const models = search ? searchModels(search, category) : filterByCategory(category);
 
       // If --fits, scan hardware and score/filter
       if (fits) {
@@ -429,13 +444,13 @@ server.tool(
 // ── monitor ──────────────────────────────────────────
 server.tool(
   "monitor",
-  "Take a one-shot snapshot of live hardware state — CPU/GPU utilization, VRAM usage, temperature, power, and active Ollama model with tokens/sec",
+  "Take a one-shot snapshot of live hardware state — CPU/GPU utilization, VRAM usage, temperature, power, and the active Ollama model with its size, quantization, and context length (tokensPerSec is always null: Ollama does not report live throughput)",
   {
     host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only; default: http://127.0.0.1:11434)"),
   },
   async ({ host }) => {
     try {
-      const ollamaHost = resolveOllamaHost(host);
+      const ollamaHost = resolveMcpOllamaHost(host);
       const monitor = new HardwareMonitor(ollamaHost);
       const snapshot = await monitor.takeSnapshot();
 

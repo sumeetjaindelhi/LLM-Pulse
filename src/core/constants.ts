@@ -69,8 +69,6 @@ export const LMSTUDIO_API_URL = "http://127.0.0.1:1234";
 // Monitor alert thresholds
 export const ALERT_THRESHOLDS = {
   vramHighPercent: 85,
-  tokSpeedDropPercent: 30,
-  gpuUnderutilizedPercent: 20,
   noModelTimeoutMs: 5 * 60 * 1000, // 5 minutes
   sparklineHistory: 60, // number of data points
   gpuTempHighCelsius: 80, // vendor-agnostic default; prefer GPU_TEMP_THRESHOLDS_BY_VENDOR
@@ -110,18 +108,6 @@ export function pickGpuTempThreshold(vendor: string, isMobile: boolean): number 
   if (v.includes("intel")) return GPU_TEMP_THRESHOLDS_BY_VENDOR.intel;
   return GPU_TEMP_THRESHOLDS_BY_VENDOR.unknown;
 }
-
-// Expected tok/s baselines by GPU tier + model size (rough estimates)
-// Format: { [vramTierGb]: { [paramBillion]: expectedTokPerSec } }
-export const EXPECTED_TOK_PER_SEC: Record<string, Record<string, number>> = {
-  "4": { "3": 25, "7": 10 },
-  "6": { "3": 40, "7": 20, "8": 15 },
-  "8": { "3": 60, "7": 35, "8": 30, "13": 15 },
-  "10": { "3": 70, "7": 45, "8": 40, "13": 25 },
-  "12": { "3": 80, "7": 50, "8": 45, "13": 30 },
-  "16": { "3": 90, "7": 55, "8": 50, "13": 35, "34": 12 },
-  "24": { "3": 100, "7": 65, "8": 60, "13": 45, "34": 20, "70": 8 },
-} as const;
 
 // LM Studio install-location hints. Non-absolute paths are prefixed with an
 // env-var name (or the sentinel `HOME`, which resolves via `os.homedir()`).

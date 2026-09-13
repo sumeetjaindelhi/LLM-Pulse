@@ -76,6 +76,7 @@ export interface ModelEntry {
   provider: string; // Meta, DeepSeek, etc.
   parametersBillion: number;
   contextWindow: number;
+  kvMbPer1kTokens?: number; // fp16 KV cache MB per 1K tokens; only set where the param-count estimate is too low
   categories: ModelCategory[];
   qualityTier: QualityTier;
   qualityScore: number; // 0-100 (relative within tier)
@@ -181,7 +182,7 @@ export interface HealthReport {
 
 // ── Monitor ──────────────────────────────────
 
-export type MonitorTab = "overview" | "inference" | "gpu" | "vram" | "models";
+export type MonitorTab = "overview" | "gpu" | "vram" | "models";
 
 export interface ModelUsage {
   name: string; // e.g. "llama3.1:8b"
