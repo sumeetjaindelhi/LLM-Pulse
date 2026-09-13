@@ -123,9 +123,10 @@ export function runDiagnostics(
   }
 
   // Apple Silicon unified memory info. `gpu.vramMb` is already the resolved
-  // usable cap (sysctl iogpu.wired_limit_mb, or 67% fallback) — no further
-  // multiplier needed. We show both the cap and the host RAM so the user can
-  // see how much is wired to the GPU vs. reserved for the OS.
+  // usable cap (iogpu.wired_limit_mb override, Metal working set, or 67%
+  // fallback) — no further multiplier needed. We show both the cap and the
+  // host RAM so the user can see how much is wired to the GPU vs. reserved for
+  // the OS.
   if (gpu && gpu.vendor === "Apple") {
     const usableGb = Math.round(gpu.vramMb / 1024);
     const totalGb = Math.round(hardware.memory.totalMb / 1024);
