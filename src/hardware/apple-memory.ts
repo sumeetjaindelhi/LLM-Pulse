@@ -2,25 +2,31 @@ import { execa } from "execa";
 import { APPLE_UNIFIED_MEMORY_FACTOR_FALLBACK } from "../core/constants.js";
 
 export interface AppleMemoryLimit {
-  /** VRAM cap in megabytes, or null if we can't determine one. */
+  /** Usable GPU memory in megabytes; null only off macOS, where there is nothing to read. */
   vramMb: number | null;
-  /** Human-readable provenance — "sysctl" if read live, "fallback" if estimated. */
-  source: "sysctl" | "fallback";
+  /** Provenance: "sysctl" (user-raised wired limit), "metal" (Metal's recommended working set), or "fallback" (fixed estimate). */
+  source: "sysctl" | "metal" | "fallback";
   /** Fraction of total RAM that ended up usable as GPU memory (for diagnostics). */
   factor: number;
 }
 
-/** Resolve the real unified-memory cap on Apple Silicon.
+const BYTES_PER_MB = 1024 * 1024;
+
+// JXA snippet printing MTLDevice.recommendedMaxWorkingSetSize in bytes, the
+// budget Ollama and llama.cpp's Metal backend size models against. Prints
+// "undefined" or "null" when there is no Metal device (e.g. Intel Macs).
+const METAL_WORKING_SET_SCRIPT =
+  'ObjC.import("Metal"); String($.MTLCreateSystemDefaultDevice().recommendedMaxWorkingSetSize)';
+
+/** Resolve the usable unified-memory GPU budget on Apple Silicon.
  *
- *  macOS limits "wired" GPU memory (pages that can't be evicted during
- *  inference) to ~67% of total RAM. The exact value is `iogpu.wired_limit_mb`,
- *  a sysctl readable from user-space. Users can raise it (e.g. for ML work)
- *  so a hardcoded 0.75 multiplier is both wrong AND blind to what the user
- *  has configured. We prefer to read the real number; fall back to 0.67.
+ *  1. `sysctl iogpu.wired_limit_mb` when > 0: the user has raised the wired
+ *     limit, so that is the real cap. It reads 0 when left at the default.
+ *  2. Metal's `recommendedMaxWorkingSetSize` via osascript (no Xcode needed).
+ *  3. A fixed 67% of total RAM when neither can be read.
  *
- *  Returns null vramMb when the reported limit is 0 (some macOS versions
- *  report 0 to mean "use the default 67%"), so the caller can apply the
- *  fallback factor to total memory themselves.
+ *  Off macOS, vramMb is null and factor is the fallback, so the caller can
+ *  apply it to total memory itself.
  */
 export async function readAppleVramLimit(totalBytes: number): Promise<AppleMemoryLimit> {
   if (process.platform !== "darwin") {
@@ -36,14 +42,31 @@ export async function readAppleVramLimit(totalBytes: number): Promise<AppleMemor
       return {
         vramMb: parsed,
         source: "sysctl",
-        factor: totalBytes > 0 ? (parsed * 1024 * 1024) / totalBytes : 0,
+        factor: totalBytes > 0 ? (parsed * BYTES_PER_MB) / totalBytes : 0,
       };
     }
   } catch {
-    // sysctl missing, key not present (Intel Mac), or timeout — use fallback.
+    // sysctl missing, key not present (Intel Mac), or timeout — try Metal.
   }
 
-  const totalMb = Math.round(totalBytes / (1024 * 1024));
+  try {
+    const { stdout } = await execa("osascript", ["-l", "JavaScript", "-e", METAL_WORKING_SET_SCRIPT], {
+      timeout: 2000,
+    });
+    const text = stdout.trim();
+    const bytes = /^\d+$/.test(text) ? Number(text) : 0;
+    if (Number.isSafeInteger(bytes) && bytes > 0) {
+      return {
+        vramMb: Math.round(bytes / BYTES_PER_MB),
+        source: "metal",
+        factor: totalBytes > 0 ? bytes / totalBytes : 0,
+      };
+    }
+  } catch {
+    // osascript missing, no Metal framework, or timeout — use fallback.
+  }
+
+  const totalMb = Math.round(totalBytes / BYTES_PER_MB);
   return {
     vramMb: Math.round(totalMb * APPLE_UNIFIED_MEMORY_FACTOR_FALLBACK),
     source: "fallback",

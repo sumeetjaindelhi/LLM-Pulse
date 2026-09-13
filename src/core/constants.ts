@@ -44,14 +44,12 @@ export const MIN_REQUIREMENTS = {
   cpuCores: 4,
 } as const;
 
-// Apple Silicon wired-GPU-memory cap. macOS enforces `iogpu.wired_limit_mb`
-// which defaults to ~67% of total RAM on Apple Silicon (the remainder is
-// reserved for OS + CPU processes and cannot be wired for GPU use). The
-// runtime reader `hardware/apple-memory.ts` prefers the live sysctl value;
-// this constant is the fallback when sysctl is unreachable. 0.67 is the
-// conservative default documented by Apple for long-running ML workloads.
-// Previous value 0.75 was overoptimistic — it produced "fits" verdicts on
-// models that hit OOM during real inference on high-memory Macs.
+// Apple Silicon unified-memory GPU budget, last resort only. The runtime
+// reader `hardware/apple-memory.ts` prefers a user-raised
+// `iogpu.wired_limit_mb`, then Metal's `recommendedMaxWorkingSetSize`
+// (e.g. 74% of 24 GB). This conservative factor applies only when neither
+// can be read, and it deliberately errs low: an overestimate produces "fits"
+// verdicts on models that OOM during real inference.
 export const APPLE_UNIFIED_MEMORY_FACTOR_FALLBACK = 0.67;
 
 // On unified-memory systems, the sysctl GPU-wired limit is the theoretical

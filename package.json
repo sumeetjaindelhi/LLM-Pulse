@@ -71,7 +71,7 @@
     "@types/node": "^22.13.9",
     "@types/react": "^19.2.14",
     "typescript": "^5.8.2",
-    "vitest": "^3.0.8"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=20.5.0"

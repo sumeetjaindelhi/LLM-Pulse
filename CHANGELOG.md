@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     limit minus its current usage, excluding reclaimable page cache.
   - Apple Silicon `monitor`: `gpuVramTotalMb` is the Metal wired limit, matching
     `scan`, instead of total RAM.
+  - Apple Silicon usable GPU memory comes from Metal's
+    `recommendedMaxWorkingSetSize` (74% of 24 GB on an M5 Pro) instead of a
+    fixed 67% estimate, which understated it by about 1.7 GB there.
+    `iogpu.wired_limit_mb` still wins when set; 67% remains the last resort
+    when Metal cannot be queried.
   - Linux hybrid CPUs count performance cores from per-CPU topology instead of
     halving (wrong on hybrid CPUs without SMT).
   - Ollama is reported running when its API answers even if the binary is not on
@@ -104,10 +109,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cache writes are atomic (temp file + rename) and replace, rather than follow,
   a planted symlink, even a dangling one; a failed write leaves no temp file
   behind.
-- `npm audit fix` lockfile refresh: 0 production advisories.
+- `npm audit fix` lockfile refresh: 0 production advisories. vitest was
+  upgraded to 4 (dev only), so `npm audit` reports 0 vulnerabilities. Running
+  the test suite now needs Node `^20.19.0 || >=22.12.0` (vite 8); the published
+  package still runs on `>=20.5.0`.
 
 ### Verified
-- 311 tests across 41 test files.
+- 319 tests across 41 test files.
 
 ## [1.0.0] - 2026-06-28
 

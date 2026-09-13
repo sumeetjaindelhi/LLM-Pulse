@@ -28,10 +28,12 @@ export async function detectHardware(): Promise<HardwareProfile> {
   ]);
 
   // Apple Silicon uses unified memory: systeminformation reports vram: 0 for
-  // Metal GPUs because there is no discrete VRAM pool. The *actual* cap on
-  // wired GPU memory is `sysctl iogpu.wired_limit_mb` (defaults to ~67% of
-  // total RAM). We resolve it once here so downstream callers can use
+  // Metal GPUs because there is no discrete VRAM pool. The usable budget is a
+  // user-raised `iogpu.wired_limit_mb`, else Metal's recommended working set.
+  // We resolve it once here so downstream callers can use
   // `primaryGpu.vramMb` as the final usable cap without further multipliers.
+  // The factor fallback covers an Apple GPU seen off macOS (e.g. Asahi Linux),
+  // where readAppleVramLimit returns vramMb null.
   for (const g of gpus) {
     if (g.acceleratorType === "metal" && g.vramMb === 0 && memory.totalMb > 0) {
       const limit = await readAppleVramLimit(memory.totalMb * 1024 * 1024);
