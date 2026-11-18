@@ -1,32 +1,38 @@
 import ora from "ora";
 import Table from "cli-table3";
 import { detectHardware } from "../../hardware/index.js";
-import { scoreModel, getAvailableVram, pickSweetSpot, isFitting } from "../../analysis/scorer.js";
+import { budgetExact, budgetGpus, getAvailableVram, pickSweetSpot, isFitting } from "../../analysis/scorer.js";
 import { resolveModel } from "../../models/database.js";
+import { withExactFacts } from "../../runtimes/ollama.js";
+import { resolveOllamaHost } from "../../core/config.js";
 import { titleBox, sectionHeader, keyValue, subLine } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
 import { fitBadge } from "../ui/badges.js";
-import { formatMb, formatQualityPct } from "../ui/progress.js";
-import { borderlessTableChars, speedLabel } from "../ui/tables.js";
+import { formatBits, formatMb, formatUsableMb, formatQualityPct, formatWeights, pullLines } from "../ui/progress.js";
+import { borderlessTableChars, speedLabel, SPEED_NOTE } from "../ui/tables.js";
+import { scoreQuants } from "./check.js";
 import { renderModelNotFound } from "../ui/errors.js";
-import { toCsv } from "../ui/csv.js";
+import { MEMORY_CSV_HEADERS, memoryCsvCells, toCsv } from "../ui/csv.js";
+import { memoryBreakdown } from "../../analysis/context-capacity.js";
 import type {
   ModelEntry,
   ModelScore,
   HardwareProfile,
   QuantAdviceOptions,
 } from "../../core/types.js";
+import { quantRetention } from "../../models/quant-facts.js";
+import { isUnifiedMemory } from "../../core/unified-memory.js";
 
-// Q2 / Q3 families sit below this — usable on VRAM-starved rigs but users
-// should know they're paying a real quality tax.
-const LOSSY_QUALITY_THRESHOLD = 0.85;
+// Retention is exp(-meanKLD) vs FP16 (llama.cpp tools/perplexity/README.md:38-125). These are definitions, not measurements:
+// below exp(-0.1) = 0.905 (mean KLD 0.1, Q3_K_M and below in that table) a quant is called lossy.
+const LOSSY_RETENTION_THRESHOLD = Math.exp(-0.1);
 
-// Within this delta, a bigger quant is just wasted VRAM (e.g. F16 over Q8_0).
-const NEGLIGIBLE_QUALITY_GAIN = 0.02;
+// Definition: a bigger quant gaining under 0.005 retention is not worth the VRAM. 0.005 sits between the
+// Q6_K->Q8_0 step (0.0041) and Q5_K_M->Q6_K (0.0053); README.md:52-54.
+const NEGLIGIBLE_RETENTION_GAIN = 0.005;
 
-// Below this delta, a smaller quant is "slightly faster, slight quality drop".
-// Above it, the drop is real and worth flagging differently.
-const NOTABLE_QUALITY_DROP = 0.05;
+// Definition: a smaller quant losing more than 0.02 retention is a real drop; the Q5_K_M->Q4_K_M step is 0.0201 (README.md:54,59).
+const NOTABLE_RETENTION_DROP = 0.02;
 
 interface QuantNote {
   text: string;
@@ -34,7 +40,7 @@ interface QuantNote {
 }
 
 interface RecommendedRef {
-  bits: number;
+  weightsMb: number;
   retention: number;
 }
 
@@ -56,28 +62,34 @@ export function describeQuant(
   recommended: RecommendedRef | null,
 ): QuantNote {
   if (!isFitting(score.fitLevel)) {
-    return { text: "Too big — overflows VRAM", tone: "fail" };
+    return { text: "Too big — overflows usable memory", tone: "fail" };
+  }
+  if (!quantRetention(score.quantization.name).published) {
+    return isRecommended
+      ? { text: "★ Sweet spot — largest that fits (quality n/a)", tone: "pass" }
+      : { text: "No published quality data", tone: "muted" };
   }
   if (isRecommended) {
     return { text: "★ Sweet spot — best quality you can fit", tone: "pass" };
   }
-  if (score.quantization.qualityRetention < LOSSY_QUALITY_THRESHOLD) {
+  if (score.quantization.qualityRetention < LOSSY_RETENTION_THRESHOLD) {
     return { text: "Noticeably lossy — only if VRAM-starved", tone: "warning" };
   }
   if (recommended === null) {
     return { text: "Fits", tone: "pass" };
   }
 
-  const bitsDelta = score.quantization.bitsPerWeight - recommended.bits;
+  // Weights, not bits: an estimated bits figure (nominal + 0.4) can rank a smaller file as the larger quant.
+  const sizeDelta = score.quantization.vramMb - recommended.weightsMb;
   const qualityDelta = score.quantization.qualityRetention - recommended.retention;
 
-  if (bitsDelta > 0) {
-    return qualityDelta < NEGLIGIBLE_QUALITY_GAIN
+  if (sizeDelta > 0) {
+    return qualityDelta < NEGLIGIBLE_RETENTION_GAIN
       ? { text: "Overkill — negligible quality gain over sweet spot", tone: "muted" }
       : { text: "Bigger — slightly better quality but tighter fit", tone: "warning" };
   }
-  if (bitsDelta < 0) {
-    return -qualityDelta >= NOTABLE_QUALITY_DROP
+  if (sizeDelta < 0) {
+    return -qualityDelta > NOTABLE_RETENTION_DROP
       ? { text: "Much smaller — faster but real quality drop", tone: "muted" }
       : { text: "Smaller — faster, slight quality drop", tone: "muted" };
   }
@@ -93,32 +105,38 @@ function renderNote(note: QuantNote): string {
   }
 }
 
+// Quants outside the published table carry a placeholder retention, so show no number for them.
+function qualityCell(score: ModelScore): string {
+  return quantRetention(score.quantization.name).published ? formatQualityPct(score.quantization.qualityRetention) : "n/a";
+}
+
 function adviceTable(
   scores: ModelScore[],
   recommendedIdx: number,
   availableVramMb: number,
+  usableExact: boolean,
 ): string {
   const table = new Table({
     chars: borderlessTableChars,
     style: { "padding-left": 0, "padding-right": 0, head: [], border: [] },
   });
 
-  table.push(["Quant", "Bits", "Size", "Quality", "Fit", "Speed"]);
+  table.push(["Quant", "Bits", "Weights", "Quality", "Fit", "Speed"]);
 
   for (let i = 0; i < scores.length; i++) {
     const s = scores[i];
     const marker = i === recommendedIdx ? theme.pass("★ ") : "  ";
     table.push([
       `${marker}${s.quantization.name}`,
-      s.quantization.bitsPerWeight.toFixed(1),
-      formatMb(s.quantization.vramMb),
-      formatQualityPct(s.quantization.qualityRetention),
+      formatBits(s.quantization),
+      formatWeights(s.quantization),
+      qualityCell(s),
       fitBadge(s.fitLevel),
       speedLabel(s.speedEstimate),
     ]);
   }
 
-  return `${table.toString()}\n  ${theme.muted(`Your available VRAM: ${formatMb(availableVramMb)}`)}`;
+  return `${table.toString()}\n  ${theme.muted(`Usable memory: ${formatUsableMb(availableVramMb, usableExact)}`)}\n  ${theme.muted(SPEED_NOTE)}`;
 }
 
 // Renders per-quant commentary as labeled lines below the table. Done outside
@@ -128,9 +146,9 @@ function adviceTable(
 // so the wrapped Notes column would mis-align under the box's left margin
 // instead of staying in its column. Free-flowing labeled lines avoid both.
 function adviceNotes(scores: ModelScore[], recommendedIdx: number): string {
-  const recommended: RecommendedRef | null = recommendedIdx >= 0
+  const recommended: RecommendedRef | null = recommendedIdx >= 0 && quantRetention(scores[recommendedIdx].quantization.name).published
     ? {
-        bits: scores[recommendedIdx].quantization.bitsPerWeight,
+        weightsMb: scores[recommendedIdx].quantization.vramMb,
         retention: scores[recommendedIdx].quantization.qualityRetention,
       }
     : null;
@@ -161,17 +179,17 @@ export async function quantAdviceCommand(
   const hardware = await detectHardware();
   spinner?.succeed("Hardware detected");
 
-  const model = resolveModel(modelArg);
+  const resolved = resolveModel(modelArg);
 
-  if (!model) {
+  if (!resolved) {
     renderModelNotFound(modelArg, { silent });
     return;
   }
+  spinner?.start("Reading model facts...");
+  const model = await withExactFacts(resolveOllamaHost(), resolved);
+  spinner?.stop();
 
-  // Ascending bitsPerWeight matches how users scan tradeoff tables — cheapest first.
-  const scores = model.quantizations
-    .map((q) => scoreModel(model, q, hardware))
-    .sort((a, b) => a.quantization.bitsPerWeight - b.quantization.bitsPerWeight);
+  const scores = scoreQuants(model, model.quantizations, hardware);
 
   const ctx: AdviceContext = {
     model,
@@ -192,7 +210,7 @@ export async function quantAdviceCommand(
 }
 
 function outputTable(ctx: AdviceContext, verbose: boolean): void {
-  const { model, hardware, scores, recommendedIdx, availableVramMb, pullCommand } = ctx;
+  const { model, hardware, scores, recommendedIdx, availableVramMb } = ctx;
   const lines: string[] = [];
 
   lines.push("");
@@ -207,7 +225,7 @@ function outputTable(ctx: AdviceContext, verbose: boolean): void {
   }
 
   lines.push(sectionHeader("Quantization Tradeoff"));
-  lines.push(adviceTable(scores, recommendedIdx, availableVramMb));
+  lines.push(adviceTable(scores, recommendedIdx, availableVramMb, budgetExact(hardware)));
 
   lines.push(sectionHeader("Notes"));
   lines.push(adviceNotes(scores, recommendedIdx));
@@ -221,24 +239,25 @@ function outputTable(ctx: AdviceContext, verbose: boolean): void {
     // table/notes alignment. Splitting keeps every line within budget.
     lines.push(
       `  ${theme.pass("★ Recommended:")} ${theme.pass(pick.quantization.name)} — ` +
-      `${theme.value(formatQualityPct(pick.quantization.qualityRetention))} quality, ` +
-      `${theme.value(formatMb(pick.quantization.vramMb))}`,
+      (quantRetention(pick.quantization.name).published
+        ? `${theme.value(formatQualityPct(pick.quantization.qualityRetention))} quality, `
+        : "") +
+      `weights ${theme.value(formatWeights(pick.quantization))}`,
     );
     lines.push(subLine(`(${pick.fitLevel.replace("_", " ")} fit, ${pick.speedEstimate} speed)`));
-    if (pullCommand) {
-      lines.push(`  ${theme.muted("→")} ${theme.command(pullCommand)}`);
-    }
+    lines.push(...pullLines(model, pick.quantization));
   } else {
-    lines.push(`  ${theme.fail("✗")} No quantization fits your ${formatMb(availableVramMb)} of VRAM.`);
+    lines.push(`  ${theme.fail("✗")} No quantization fits your ${formatUsableMb(availableVramMb, budgetExact(hardware))} of usable memory.`);
     lines.push(`  ${theme.muted("Try:")} ${theme.command(`llm-pulse check ${model.ollamaTag ?? model.id}`)} ${theme.muted("for layer-offload tips")}`);
     lines.push(`  ${theme.muted("Or browse smaller models:")} ${theme.command("llm-pulse models --fits")}`);
   }
 
-  // Unified-memory nudge so the VRAM number makes sense on Macs, where users
-  // see e.g. "10 GB" but the system reports 16+ GB total. Trimmed phrasing
+  // Unified-memory nudge so the usable number makes sense on shared-memory machines, where users
+  // see e.g. "10 GiB" but the system reports 16+ GiB total. Trimmed phrasing
   // keeps it under boxen's 72-col content budget at 80-col terminals.
-  if (hardware.primaryGpu?.acceleratorType === "metal") {
-    lines.push(subLine("(Apple Silicon: unified memory, sysctl-capped)"));
+  const [budgetGpu] = budgetGpus(hardware);
+  if (budgetGpu && isUnifiedMemory(budgetGpu)) {
+    lines.push(subLine("(unified memory — shared with system RAM)"));
   }
 
   console.log(titleBox(lines.join("\n")));
@@ -258,6 +277,7 @@ function outputJson(ctx: AdviceContext): void {
     },
     hardware: {
       gpu: hardware.primaryGpu?.model ?? null,
+      gpuCount: budgetGpus(hardware).length,
       vramMb: availableVramMb,
     },
     recommended: pick ? {
@@ -267,6 +287,8 @@ function outputJson(ctx: AdviceContext): void {
       qualityRetention: pick.quantization.qualityRetention,
       fitLevel: pick.fitLevel,
       speedEstimate: pick.speedEstimate,
+      qualityMeasured: quantRetention(pick.quantization.name).published,
+      memory: memoryBreakdown(model, pick.quantization, hardware),
     } : null,
     quantizations: scores.map((s, i) => ({
       name: s.quantization.name,
@@ -276,18 +298,22 @@ function outputJson(ctx: AdviceContext): void {
       fitLevel: s.fitLevel,
       speedEstimate: s.speedEstimate,
       isRecommended: i === recommendedIdx,
+      qualityMeasured: quantRetention(s.quantization.name).published,
+      memory: memoryBreakdown(model, s.quantization, hardware),
     })),
     pullCommand,
+    pullQuantization: model.quantizations.find((q) => q.exact)?.name ?? null,
   };
 
   console.log(JSON.stringify(output, null, 2));
 }
 
 function outputCsv(ctx: AdviceContext): void {
-  const { scores, availableVramMb, recommendedIdx } = ctx;
+  const { model, hardware, scores, availableVramMb, recommendedIdx } = ctx;
   const headers = [
     "quantization", "bitsPerWeight", "vramMb", "qualityRetention",
     "vramAvailable", "fitLevel", "speedEstimate", "isRecommended",
+    "qualityMeasured", ...MEMORY_CSV_HEADERS,
   ];
   const rows = scores.map((s, i) => [
     s.quantization.name,
@@ -298,6 +324,8 @@ function outputCsv(ctx: AdviceContext): void {
     s.fitLevel,
     s.speedEstimate,
     i === recommendedIdx,
+    quantRetention(s.quantization.name).published,
+    ...memoryCsvCells(memoryBreakdown(model, s.quantization, hardware)),
   ]);
   console.log(toCsv(headers, rows));
 }

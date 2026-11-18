@@ -4,14 +4,18 @@ import { z } from "zod";
 import { detectHardware } from "../hardware/index.js";
 import { HardwareMonitor } from "../hardware/monitor.js";
 import { detectAllRuntimes } from "../runtimes/index.js";
-import { searchModels, filterByCategory, resolveModel } from "../models/database.js";
+import { searchModels, filterByCategory, resolveModel, getCatalogHealth, findQuant } from "../models/database.js";
 import { modelNotFoundPayload } from "../cli/ui/errors.js";
 import { clearOllamaCache } from "../models/ollama-models.js";
+import { refreshLibraryCatalogIfStale } from "../models/library-cache.js";
 import { checkContextFit } from "../analysis/context-fit.js";
 import { getRecommendations } from "../analysis/recommender.js";
-import { scoreModel, deriveVerdict, getAvailableVram, isFitting } from "../analysis/scorer.js";
+import { budgetGpus, scoreModel, getAvailableVram, isFitting } from "../analysis/scorer.js";
+import { memoryBreakdown } from "../analysis/context-capacity.js";
+import { checkResult, scoreQuants } from "../cli/commands/check.js";
+import { withExactFacts, fetchLoadedModelsWithKv } from "../runtimes/ollama.js";
 import { runDiagnostics } from "../analysis/doctor.js";
-import { resolveOllamaHost, resolveLmStudioHost, CATEGORY_FILTERS } from "../core/config.js";
+import { resolveOllamaHost, resolveLmStudioHost, isOffline, CATEGORY_FILTERS } from "../core/config.js";
 import { VERSION, OLLAMA_API_URL, LMSTUDIO_API_URL } from "../core/constants.js";
 import { LocalhostUrl } from "../core/api-schemas.js";
 import type { QuantizationVariant } from "../core/types.js";
@@ -30,6 +34,8 @@ export function resolveMcpOllamaHost(host?: string): string {
 export function resolveMcpLmStudioHost(): string {
   return localhostOr(resolveLmStudioHost(), LMSTUDIO_API_URL);
 }
+
+const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 const CategoryEnum = z.enum(CATEGORY_FILTERS);
 
@@ -67,7 +73,7 @@ server.tool(
       });
 
       const result = {
-        hardware,
+        hardware: { ...hardware, gpuCount: budgetGpus(hardware).length },
         runtimes,
         recommendations: recommendations.map((r) => ({
           rank: r.rank,
@@ -77,6 +83,7 @@ server.tool(
           vramMb: r.score.quantization.vramMb,
           compositeScore: r.score.compositeScore,
           pullCommand: r.pullCommand,
+          memory: memoryBreakdown(r.score.model, r.score.quantization, hardware),
         })),
       };
 
@@ -93,18 +100,18 @@ server.tool(
 // ── check ────────────────────────────────────────────
 server.tool(
   "check",
-  "Check if your hardware can run a specific model — shows verdict (yes/maybe/no), best quantization, VRAM fit, and speed estimate",
+  "Check if your hardware can run a specific model — shows verdict (yes/maybe/no), best quantization, memory need vs usable memory (estimated parts flagged), and a rough speed class",
   {
     model: z.string().describe("Model name, ID, or Ollama tag (e.g. 'llama3.1:8b', 'deepseek-coder-v2')"),
     quant: z.string().optional().describe("Specific quantization to check (e.g. 'Q4_K_M', 'Q8_0')"),
-    host: LocalhostUrl.optional().describe("Accepted for compatibility; not used by this tool"),
+    host: LocalhostUrl.optional().describe("Ollama API host URL (localhost only; default: http://127.0.0.1:11434)"),
   },
-  async ({ model: modelArg, quant }) => {
+  async ({ model: modelArg, quant, host }) => {
     try {
       const hardware = await detectHardware();
-      const model = resolveModel(modelArg);
+      const resolved = resolveModel(modelArg);
 
-      if (!model) {
+      if (!resolved) {
         return {
           isError: true,
           content: [{
@@ -113,13 +120,14 @@ server.tool(
           }],
         };
       }
+      const model = await withExactFacts(resolveMcpOllamaHost(host), resolved);
 
       // Filter quantizations if specific quant requested. Return a useful
       // error on mismatch instead of silently falling through to all quants —
       // users who typo'd a quant name deserve to know.
       let quants = model.quantizations;
       if (quant) {
-        const match = quants.find((q) => q.name.toLowerCase() === quant.toLowerCase());
+        const match = findQuant(model, quant);
         if (!match) {
           return {
             isError: true,
@@ -135,10 +143,7 @@ server.tool(
         quants = [match];
       }
 
-      // Score all quantizations
-      const scores = quants
-        .map((q) => scoreModel(model, q, hardware))
-        .sort((a, b) => b.compositeScore - a.compositeScore);
+      const scores = scoreQuants(model, quants, hardware);
 
       // Defense-in-depth: if the model has zero quantizations in the DB
       // (should never happen with the current data/models.json, but the
@@ -155,48 +160,8 @@ server.tool(
         };
       }
 
-      const bestScore = scores[0];
-      const verdict = deriveVerdict(bestScore.fitLevel);
-      const availableVramMb = getAvailableVram(hardware);
-      const pullCommand = model.ollamaTag ? `ollama pull ${model.ollamaTag}` : null;
-
-      const result = {
-        model: {
-          id: model.id,
-          name: model.name,
-          provider: model.provider,
-          parametersBillion: model.parametersBillion,
-          contextWindow: model.contextWindow,
-          qualityTier: model.qualityTier,
-          ollamaTag: model.ollamaTag,
-        },
-        hardware: {
-          gpu: hardware.primaryGpu?.model ?? null,
-          vramMb: availableVramMb,
-          ramMb: hardware.memory.totalMb,
-        },
-        verdict,
-        bestQuantization: {
-          name: bestScore.quantization.name,
-          bitsPerWeight: bestScore.quantization.bitsPerWeight,
-          vramMb: bestScore.quantization.vramMb,
-          fitLevel: bestScore.fitLevel,
-          fitRatio: Math.round(bestScore.fitRatio * 100) / 100,
-          compositeScore: bestScore.compositeScore,
-          speedEstimate: bestScore.speedEstimate,
-        },
-        allQuantizations: scores.map((s) => ({
-          name: s.quantization.name,
-          vramNeeded: s.quantization.vramMb,
-          vramAvailable: availableVramMb,
-          fitLevel: s.fitLevel,
-          compositeScore: s.compositeScore,
-          speedEstimate: s.speedEstimate,
-        })),
-        pullCommand,
-      };
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+      // The same payload as `check --format json`.
+      return { content: [{ type: "text" as const, text: JSON.stringify(checkResult(model, hardware, scores), null, 2) }] };
     } catch (err) {
       return {
         isError: true,
@@ -209,7 +174,7 @@ server.tool(
 // ── context-fit-check ────────────────────────────────
 server.tool(
   "context-fit-check",
-  "Check whether a prompt of N tokens fits a model's context on your hardware. Combines the model's native context window with the hardware-afforded max (the KV cache that fits beside the weights in VRAM) and returns a verdict, headroom, and a remedy when it won't fit.",
+  "Check whether a prompt of N tokens fits a model's context on your hardware. Combines the model's native context window with the hardware-afforded max (the KV cache that fits beside the weights in usable memory) and returns a verdict, headroom, the memory need at those tokens, and a remedy when it won't fit.",
   {
     model: z.string().describe("Model name, ID, or Ollama tag (e.g. 'llama3.1:8b')"),
     promptTokens: z.number().int().min(0).describe("Number of prompt/input tokens to check"),
@@ -219,18 +184,19 @@ server.tool(
   async ({ model: modelArg, promptTokens, responseTokens, quant }) => {
     try {
       const hardware = await detectHardware();
-      const model = resolveModel(modelArg);
+      const resolved = resolveModel(modelArg);
 
-      if (!model) {
+      if (!resolved) {
         return {
           isError: true,
           content: [{ type: "text" as const, text: JSON.stringify(modelNotFoundPayload(modelArg), null, 2) }],
         };
       }
+      const model = await withExactFacts(resolveMcpOllamaHost(), resolved);
 
       let forcedQuant: QuantizationVariant | undefined;
       if (quant) {
-        const match = model.quantizations.find((q) => q.name.toLowerCase() === quant.toLowerCase());
+        const match = findQuant(model, quant);
         if (!match) {
           return {
             isError: true,
@@ -264,7 +230,7 @@ server.tool(
 // ── recommend ────────────────────────────────────────
 server.tool(
   "recommend",
-  "Get model recommendations for your current hardware — returns ranked list sorted by composite score (quality + quantization + tier + fit)",
+  "Get model recommendations for your current hardware — ranks by fit first (models that fit with headroom before tight ones), then composite score (quality + quantization + tier); one model per family; embedding and ternary models are excluded",
   {
     category: CategoryEnum.optional().default("all").describe("Filter by model category"),
     top: z.number().int().min(1).max(50).optional().default(5).describe("Number of recommendations"),
@@ -279,6 +245,7 @@ server.tool(
       const result = {
         hardware: {
           gpu: hardware.primaryGpu?.model ?? null,
+          gpuCount: budgetGpus(hardware).length,
           vramMb: getAvailableVram(hardware),
           ramMb: hardware.memory.totalMb,
         },
@@ -290,6 +257,7 @@ server.tool(
             provider: r.score.model.provider,
             parametersBillion: r.score.model.parametersBillion,
             contextWindow: r.score.model.contextWindow,
+            contextWindowEstimated: r.score.model.contextWindowEstimated === true,
             qualityTier: r.score.model.qualityTier,
             categories: r.score.model.categories,
             ollamaTag: r.score.model.ollamaTag,
@@ -300,6 +268,7 @@ server.tool(
           compositeScore: r.score.compositeScore,
           speedEstimate: r.score.speedEstimate,
           pullCommand: r.pullCommand,
+          memory: memoryBreakdown(r.score.model, r.score.quantization, hardware),
         })),
       };
 
@@ -330,7 +299,9 @@ server.tool(
         detectAllRuntimes(ollamaHost, resolveMcpLmStudioHost()),
       ]);
 
-      const report = runDiagnostics(hardware, runtimes);
+      const ollamaRunning = runtimes.some((r) => r.name === "Ollama" && r.status === "running");
+      const loadedModels = ollamaRunning ? await fetchLoadedModelsWithKv(ollamaHost) : [];
+      const report = runDiagnostics(hardware, runtimes, loadedModels, getCatalogHealth());
 
       return { content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }] };
     } catch (err) {
@@ -350,9 +321,10 @@ server.tool(
     search: z.string().optional().describe("Search query — matches model name, ID, or provider"),
     category: CategoryEnum.optional().default("all").describe("Filter by model category"),
     fits: z.boolean().optional().default(false).describe("Only show models that fit your hardware (triggers hardware scan)"),
+    limit: z.number().int().min(1).max(500).optional().default(100).describe("Maximum rows to return (default 100, max 500); `total` reports how many matched"),
     host: LocalhostUrl.optional().describe("Accepted for compatibility; not used by this tool"),
   },
-  async ({ search, category, fits }) => {
+  async ({ search, category, fits, limit }) => {
     try {
       // Resolve models from database
       const models = search ? searchModels(search, category) : filterByCategory(category);
@@ -403,15 +375,16 @@ server.tool(
         return {
           content: [{
             type: "text" as const,
-            text: JSON.stringify({ count: scored.length, models: scored }, null, 2),
+            text: JSON.stringify({ count: Math.min(scored.length, limit), total: scored.length, models: scored.slice(0, limit) }, null, 2),
           }],
         };
       }
 
       // No hardware filter — show all with smallest quant info. Guard against
       // models with no quantizations (defense-in-depth; not expected in practice).
-      const result = models
-        .filter((m) => m.quantizations.length > 0)
+      const listed = models.filter((m) => m.quantizations.length > 0);
+      const result = listed
+        .slice(0, limit)
         .map((m) => {
           const smallest = m.quantizations[0];
           return {
@@ -429,7 +402,7 @@ server.tool(
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({ count: result.length, models: result }, null, 2),
+          text: JSON.stringify({ count: result.length, total: listed.length, models: result }, null, 2),
         }],
       };
     } catch (err) {
@@ -468,4 +441,10 @@ server.tool(
 export async function startServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Tools only read the cached catalog; this keeps a long-running server's copy current.
+  if (!isOffline()) {
+    void refreshLibraryCatalogIfStale();
+    setInterval(() => void refreshLibraryCatalogIfStale(), CATALOG_REFRESH_INTERVAL_MS).unref();
+  }
 }

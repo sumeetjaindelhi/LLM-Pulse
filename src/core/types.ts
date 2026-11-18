@@ -29,6 +29,10 @@ export interface GpuInfo {
   driverVersion: string;
   acceleratorVersion: string | null; // CUDA for NVIDIA, ROCm for AMD, Metal for Apple, oneAPI/Level Zero for Intel
   acceleratorType: "cuda" | "rocm" | "metal" | "oneapi" | null;
+  /** GPU memory is system RAM or a shared pool, not dedicated VRAM. */
+  unifiedMemory?: boolean;
+  /** AMD gfx target from the KFD topology (e.g. "gfx1151"); Ollama admits an integrated AMD GPU by it. */
+  gfxTarget?: string;
   utilizationPercent: number | null;
   temperatureCelsius: number | null;
   vramUsedMb: number | null;
@@ -66,8 +70,9 @@ export type QualityTier = "frontier" | "strong" | "good" | "lightweight";
 export interface QuantizationVariant {
   name: string; // Q4_K_M, Q5_K_M, Q8_0, F16
   bitsPerWeight: number;
-  vramMb: number; // Estimated VRAM needed
+  vramMb: number; // Weights in MiB: estimated from bits per weight, or the real file size when `exact`
   qualityRetention: number; // 0.0 - 1.0 (1.0 = no loss)
+  exact?: boolean; // this quant is the file `ollama pull <ollamaTag>` installs, and vramMb is its real size (registry manifest or installed file)
 }
 
 export interface ModelEntry {
@@ -76,13 +81,45 @@ export interface ModelEntry {
   provider: string; // Meta, DeepSeek, etc.
   parametersBillion: number;
   contextWindow: number;
-  kvMbPer1kTokens?: number; // fp16 KV cache MB per 1K tokens; only set where the param-count estimate is too low
+  kvMbPer1kTokens?: number; // fp16 KV cache MB per 1K tokens, curated where the size bucket underestimates; unused when `arch` is set
   categories: ModelCategory[];
   qualityTier: QualityTier;
   qualityScore: number; // 0-100 (relative within tier)
   quantizations: QuantizationVariant[];
   ollamaTag: string | null; // e.g. "llama3.1:8b"
   releaseDate: string; // YYYY-MM
+  source?: "curated" | "library"; // bundled data/models.json row vs synthesized from the live ollama.com catalog
+  activeParametersBillion?: number; // mixture-of-experts: parameters active per token
+  contextWindowEstimated?: boolean; // contextWindow is a conservative guess, not the model's real window
+  arch?: ArchFacts; // exact architecture facts from the model's GGUF metadata, when known
+}
+
+/** Architecture facts read from a model's GGUF metadata (or Ollama /api/show). Omit fields that are unknown. */
+export interface ArchFacts {
+  architecture: string;
+  layers: number;
+  /** Scalar for every layer, or per layer (length must equal `layers`); 0 marks a layer with no KV. `layers` must be an integer >= 0. */
+  headCountKv: number | number[];
+  keyLength: number;
+  valueLength: number;
+  /** Head sizes of sliding-window layers; default to keyLength/valueLength (L src/llama-model.cpp:1666-1672). */
+  keyLengthSwa?: number;
+  valueLengthSwa?: number;
+  /** Per-layer recurrent flag (qwen35, qwen3next: attention.recurrent_layers or full_attention_interval); those layers own no KV. */
+  recurrentLayers?: boolean[];
+  /** Only layers [0, kvLayers) own KV: layers - shared_kv_layers (gemma4). */
+  kvLayers?: number;
+  slidingWindow?: number;
+  /** Per-layer mask (true = SWA) or the period N of the repeating pattern. */
+  slidingWindowPattern?: number | boolean[];
+  /** Multi-head latent attention: no V cache. */
+  mla?: boolean;
+  /** Total bytes of constant recurrent state (all recurrent layers). */
+  recurrentStateBytes?: number;
+  vocabSize?: number;
+  contextLength?: number;
+  /** Why the memory model is incomplete for this model (MTP drafting, parallel-hybrid SSM state); the KV estimate is then not exact. */
+  inexactReason?: string;
 }
 
 // ── Ollama Live Models ───────────────────────
@@ -100,6 +137,9 @@ export interface LibraryCatalogModel {
   description: string;
   parameterSizes: string[]; // ["8b", "70b", "405b"]
   capabilities: string[]; // ["tools", "thinking"]
+  pulls?: number; // all-time pull count shown on the card
+  updated?: string; // YYYY-MM-DD of the card's last update (UTC)
+  cloud?: boolean; // card carries the "cloud" badge (some or all tags run on Ollama's servers)
 }
 
 export type MergedModelSource = "curated" | "library" | "installed";
@@ -116,6 +156,19 @@ export interface MergedModel {
 // ── Scoring ───────────────────────────────────
 
 export type FitLevel = "excellent" | "comfortable" | "tight" | "barely" | "cannot_run";
+
+/** Memory (MiB) one quant needs at a context, split into the parts of memoryNeedMb, with which parts are exact. */
+export interface MemoryBreakdown {
+  contextTokens: number;
+  weightsMb: number;
+  weightsExact: boolean; // QuantizationVariant.exact: the real file size, not params x bits per weight
+  kvCacheMb: number;
+  kvExact: boolean; // from the model's architecture facts; false for the size-bucket estimate
+  computeMb: number; // always an estimate (memory-model.ts COMPUTE_BUFFER_EXCESS margin)
+  totalMb: number; // weights + KV cache + compute buffer: memoryNeedMb at contextTokens
+  budgetMb: number; // usable memory: VRAM (or RAM) minus the runtime's reserves
+  budgetExact: boolean; // false when budgetMb includes llm-pulse's estimated GPU context reserve (scorer.ts budgetExact)
+}
 
 export interface ModelScore {
   model: ModelEntry;
@@ -142,6 +195,14 @@ export interface RuntimeInfo {
   version: string | null;
   path: string | null;
   models: string[]; // Installed model names
+}
+
+// A model currently loaded in Ollama (/api/ps). arch holds its architecture facts from /api/show when they could be read.
+export interface LoadedModel {
+  name: string;
+  contextLength: number | null;
+  quantizationLevel?: string; // e.g. "Q4_K_M"
+  arch?: ArchFacts;
 }
 
 // ── Doctor ────────────────────────────────────
@@ -171,6 +232,17 @@ export interface DiagnosticCheck {
   message: string;
   suggestion?: string;
   fix?: FixAction;
+}
+
+/** State of the live ollama.com model catalog; timestamps are epoch milliseconds. */
+export interface CatalogHealth {
+  source: "live" | "bundled";
+  fetchedAt: number | null;
+  liveModels: number;
+  lastError: string | null;
+  lastSuccessAt: number | null;
+  /** True when LLMPULSE_OFFLINE or the offline config disables fetching. */
+  offline: boolean;
 }
 
 export interface HealthReport {
@@ -206,9 +278,9 @@ export interface VramBreakdown {
   totalMb: number;
   usedMb: number;
   freeMb: number;
-  modelWeightsMb: number; // from model database
-  kvCacheMb: number; // estimated from context
-  overheadMb: number; // usedMb - weights - kvCache
+  modelVramMb: number; // Ollama /api/ps size_vram of the loaded model, at most usedMb; 0 when none is loaded or not split
+  otherMb: number; // usedMb - modelVramMb
+  split: boolean; // false: size_vram may span GPUs the monitor does not read, so only used/free are meaningful (modelVramMb is 0)
 }
 
 export type AlertSeverity = "warning" | "info" | "success";
@@ -312,7 +384,7 @@ export interface GpuOffloadSuggestion {
   totalLayers: number;
   estimatedVramUsedMb: number;
   reason: OffloadReason;
-  ollamaCommand: string | null;
+  ollamaCommand: string | null; // null without a tag, or when `ollama run <tag>` loads another quant than the one sized
 }
 
 // ── Optimize Command ─────────────────────────
@@ -380,4 +452,6 @@ export interface ContextFitResult {
   verdict: "yes" | "tight" | "no";
   headroomTokens: number;
   remedy: string | null;
+  memory: MemoryBreakdown; // need of `quant` at neededTokens
+  nativeWindowEstimated?: true; // nativeWindow is a guess, so only the hardware ceiling applied
 }

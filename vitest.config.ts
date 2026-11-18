@@ -5,5 +5,7 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // Tests never touch the live catalog or the user's cache; live-mode tests opt in with vi.stubEnv.
+    env: { LLMPULSE_OFFLINE: "1" },
   },
 });

@@ -1,13 +1,17 @@
 import ora from "ora";
 import { detectHardware } from "../../hardware/index.js";
-import { scoreModel, getAvailableVram, isFitting } from "../../analysis/scorer.js";
+import { scoreModel, getAvailableVram, headlineScore, isFitting } from "../../analysis/scorer.js";
 import { getRecommendations } from "../../analysis/recommender.js";
-import { resolveModel } from "../../models/database.js";
+import { findQuant, resolveModel } from "../../models/database.js";
+import { withExactFacts } from "../../runtimes/ollama.js";
+import { resolveOllamaHost } from "../../core/config.js";
 import { comparisonTable } from "../ui/tables.js";
 import { sectionHeader, titleBox } from "../ui/boxes.js";
+import { pullLines } from "../ui/progress.js";
 import { theme } from "../ui/colors.js";
 import { renderModelNotFound } from "../ui/errors.js";
-import { toCsv } from "../ui/csv.js";
+import { MEMORY_CSV_HEADERS, memoryCsvCells, toCsv } from "../ui/csv.js";
+import { memoryBreakdown } from "../../analysis/context-capacity.js";
 import type {
   ModelEntry,
   ModelScore,
@@ -24,13 +28,7 @@ function pickBestScore(
   forcedQuant?: QuantizationVariant,
 ): ModelScore {
   if (forcedQuant) return scoreModel(model, forcedQuant, hardware, category);
-
-  // Score all quantizations, pick highest compositeScore
-  const scores = model.quantizations
-    .map((q) => scoreModel(model, q, hardware, category))
-    .sort((a, b) => b.compositeScore - a.compositeScore);
-
-  return scores[0];
+  return headlineScore(model.quantizations.map((q) => scoreModel(model, q, hardware, category)));
 }
 
 function findWinner(scores: ModelScore[]): number {
@@ -66,7 +64,7 @@ export async function compareCommand(
 
   if (modelArgs.length > 0) {
     // Explicit mode: resolve each model arg
-    scores = resolveExplicitModels(modelArgs, hardware, options, spinner, silent);
+    scores = await resolveExplicitModels(modelArgs, hardware, options, spinner, silent);
   } else {
     // Category mode: auto-pick top N
     scores = resolveCategoryModels(hardware, options, spinner, silent);
@@ -89,30 +87,36 @@ export async function compareCommand(
   const availableVram = getAvailableVram(hardware);
 
   if (isJson) {
-    outputJson(scores, winnerIdx, availableVram);
+    outputJson(scores, winnerIdx, availableVram, hardware);
   } else if (isCsv) {
-    outputCsv(scores, winnerIdx, availableVram);
+    outputCsv(scores, winnerIdx, availableVram, hardware);
   } else {
-    outputTable(scores, winnerIdx, availableVram);
+    outputTable(scores, winnerIdx, hardware);
   }
 }
 
-function resolveExplicitModels(
+async function resolveExplicitModels(
   args: string[],
   hardware: HardwareProfile,
   options: CompareOptions,
   spinner: ReturnType<typeof ora> | null,
   silent: boolean,
-): ModelScore[] {
+): Promise<ModelScore[]> {
   const scores: ModelScore[] = [];
   // json/csv stdout must carry only the payload, so diagnostics go to stderr there.
   const log = silent ? console.error : console.log;
-  const requestedQuant = options.quant?.toLowerCase();
+  const host = resolveOllamaHost(options.host);
 
-  for (const arg of args) {
+  spinner?.start("Reading model facts...");
+  const models = await Promise.all(args.map(async (arg) => {
     const model = resolveModel(arg);
+    return model && withExactFacts(host, model);
+  }));
+  spinner?.stop();
+
+  for (const [i, arg] of args.entries()) {
+    const model = models[i];
     if (!model) {
-      spinner?.stop();
       if (silent) {
         process.exitCode = 1;
         log(`Model not found: ${arg}`);
@@ -122,11 +126,8 @@ function resolveExplicitModels(
       continue;
     }
 
-    const forcedQuant = requestedQuant
-      ? model.quantizations.find((q) => q.name.toLowerCase() === requestedQuant)
-      : undefined;
-    if (requestedQuant && !forcedQuant) {
-      spinner?.stop();
+    const forcedQuant = options.quant ? findQuant(model, options.quant) : undefined;
+    if (options.quant && !forcedQuant) {
       log(`  ${theme.warning("⚠")} ${model.name}: quant ${options.quant} not available, using best fit`);
     }
 
@@ -157,19 +158,17 @@ function resolveCategoryModels(
   return recs.map((r) => r.score);
 }
 
-function outputTable(scores: ModelScore[], winnerIdx: number, availableVram: number): void {
+function outputTable(scores: ModelScore[], winnerIdx: number, hardware: HardwareProfile): void {
   const lines: string[] = [];
   lines.push(sectionHeader("Model Comparison"));
   lines.push("");
-  lines.push(comparisonTable(scores, availableVram, winnerIdx));
+  lines.push(comparisonTable(scores, hardware, winnerIdx));
 
   if (winnerIdx >= 0) {
     const winner = scores[winnerIdx];
     lines.push("");
     lines.push(`  ${theme.pass("★")} Winner: ${theme.pass(winner.model.name)} — score ${theme.number(String(winner.compositeScore))}`);
-    if (winner.model.ollamaTag) {
-      lines.push(`  Run: ${theme.command(`ollama pull ${winner.model.ollamaTag}`)}`);
-    }
+    lines.push(...pullLines(winner.model, winner.quantization));
   } else {
     lines.push("");
     lines.push(`  ${theme.warning("No models can run on your hardware.")}`);
@@ -178,7 +177,7 @@ function outputTable(scores: ModelScore[], winnerIdx: number, availableVram: num
   console.log(titleBox(lines.join("\n")));
 }
 
-function outputJson(scores: ModelScore[], winnerIdx: number, availableVram: number): void {
+function outputJson(scores: ModelScore[], winnerIdx: number, availableVram: number, hardware: HardwareProfile): void {
   const output = {
     models: scores.map((s) => ({
       id: s.model.id,
@@ -186,6 +185,7 @@ function outputJson(scores: ModelScore[], winnerIdx: number, availableVram: numb
       provider: s.model.provider,
       parametersBillion: s.model.parametersBillion,
       contextWindow: s.model.contextWindow,
+      contextWindowEstimated: s.model.contextWindowEstimated === true,
       qualityTier: s.model.qualityTier,
       qualityScore: s.model.qualityScore,
       quantization: s.quantization.name,
@@ -194,6 +194,7 @@ function outputJson(scores: ModelScore[], winnerIdx: number, availableVram: numb
       fitLevel: s.fitLevel,
       compositeScore: s.compositeScore,
       speedEstimate: s.speedEstimate,
+      memory: memoryBreakdown(s.model, s.quantization, hardware),
     })),
     winner: winnerIdx >= 0 ? scores[winnerIdx].model.id : null,
   };
@@ -201,17 +202,20 @@ function outputJson(scores: ModelScore[], winnerIdx: number, availableVram: numb
   console.log(JSON.stringify(output, null, 2));
 }
 
-function outputCsv(scores: ModelScore[], winnerIdx: number, availableVram: number): void {
+function outputCsv(scores: ModelScore[], winnerIdx: number, availableVram: number, hardware: HardwareProfile): void {
   const headers = [
     "id", "name", "provider", "parametersBillion", "contextWindow",
     "qualityTier", "quantization", "vramMb", "availableVramMb",
     "fitLevel", "compositeScore", "speedEstimate", "isWinner",
+    ...MEMORY_CSV_HEADERS, "contextWindowEstimated",
   ];
   const rows = scores.map((s, i) => [
     s.model.id, s.model.name, s.model.provider, s.model.parametersBillion,
     s.model.contextWindow, s.model.qualityTier, s.quantization.name,
     s.quantization.vramMb, availableVram, s.fitLevel, s.compositeScore,
     s.speedEstimate, i === winnerIdx,
+    ...memoryCsvCells(memoryBreakdown(s.model, s.quantization, hardware)),
+    s.model.contextWindowEstimated === true,
   ]);
   console.log(toCsv(headers, rows));
 }

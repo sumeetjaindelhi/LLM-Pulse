@@ -5,11 +5,12 @@
     "provider": "Meta",
     "parametersBillion": 8,
     "contextWindow": 131072,
+    "arch": { "architecture": "llama", "layers": 32, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 131072, "vocabSize": 128256 },
     "categories": ["general", "coding", "reasoning"],
     "qualityTier": "strong",
     "qualityScore": 82,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 5000, "qualityRetention": 0.92 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4693, "qualityRetention": 0.92, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 5800, "qualityRetention": 0.95 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 8500, "qualityRetention": 0.99 },
       { "name": "F16", "bitsPerWeight": 16, "vramMb": 16000, "qualityRetention": 1.0 }
@@ -23,11 +24,12 @@
     "provider": "Meta",
     "parametersBillion": 70,
     "contextWindow": 131072,
+    "arch": { "architecture": "llama", "layers": 80, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 131072, "vocabSize": 128256 },
     "categories": ["general", "coding", "reasoning"],
     "qualityTier": "frontier",
     "qualityScore": 95,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 40000, "qualityRetention": 0.90 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 40551, "qualityRetention": 0.90, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 47000, "qualityRetention": 0.93 }
     ],
     "ollamaTag": "llama3.1:70b",
@@ -39,12 +41,12 @@
     "provider": "Meta",
     "parametersBillion": 3,
     "contextWindow": 131072,
-    "kvMbPer1kTokens": 110,
+    "arch": { "architecture": "llama", "layers": 28, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 131072, "vocabSize": 128256 },
     "categories": ["general"],
     "qualityTier": "lightweight",
     "qualityScore": 55,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 2000, "qualityRetention": 0.91 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 1926, "qualityRetention": 0.91, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 3500, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "llama3.2:3b",
@@ -56,12 +58,13 @@
     "provider": "Meta",
     "parametersBillion": 1,
     "contextWindow": 131072,
+    "arch": { "architecture": "llama", "layers": 16, "headCountKv": 8, "keyLength": 64, "valueLength": 64, "contextLength": 131072, "vocabSize": 128256 },
     "categories": ["general"],
     "qualityTier": "lightweight",
     "qualityScore": 35,
     "quantizations": [
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 800, "qualityRetention": 0.90 },
-      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 1400, "qualityRetention": 0.99 }
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 1260, "qualityRetention": 0.99, "exact": true }
     ],
     "ollamaTag": "llama3.2:1b",
     "releaseDate": "2024-09"
@@ -71,13 +74,13 @@
     "name": "DeepSeek R1 7B",
     "provider": "DeepSeek",
     "parametersBillion": 7,
-    "contextWindow": 65536,
+    "contextWindow": 131072,
+    "arch": { "architecture": "qwen2", "layers": 28, "headCountKv": 4, "keyLength": 128, "valueLength": 128, "contextLength": 131072, "vocabSize": 152064 },
     "categories": ["reasoning", "coding"],
     "qualityTier": "strong",
     "qualityScore": 80,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4500, "qualityRetention": 0.91 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 5400, "qualityRetention": 0.94 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4466, "qualityRetention": 0.91, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 7800, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "deepseek-r1:7b",
@@ -88,13 +91,14 @@
     "name": "DeepSeek R1 14B",
     "provider": "DeepSeek",
     "parametersBillion": 14,
-    "contextWindow": 65536,
+    "contextWindow": 131072,
+    "arch": { "architecture": "qwen2", "layers": 48, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 131072, "vocabSize": 152064 },
     "categories": ["reasoning", "coding"],
     "qualityTier": "strong",
     "qualityScore": 87,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8500, "qualityRetention": 0.91 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 10000, "qualityRetention": 0.94 }
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8572, "qualityRetention": 0.91, "exact": true },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 14187, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "deepseek-r1:14b",
     "releaseDate": "2025-01"
@@ -104,13 +108,14 @@
     "name": "DeepSeek R1 32B",
     "provider": "DeepSeek",
     "parametersBillion": 32,
-    "contextWindow": 65536,
+    "contextWindow": 131072,
+    "arch": { "architecture": "qwen2", "layers": 64, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 131072, "vocabSize": 152064 },
     "categories": ["reasoning", "coding"],
     "qualityTier": "frontier",
     "qualityScore": 92,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 19000, "qualityRetention": 0.90 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 23000, "qualityRetention": 0.93 }
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 18932, "qualityRetention": 0.90, "exact": true },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 32428, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "deepseek-r1:32b",
     "releaseDate": "2025-01"
@@ -120,12 +125,13 @@
     "name": "Qwen 2.5 7B",
     "provider": "Alibaba",
     "parametersBillion": 7,
-    "contextWindow": 131072,
+    "contextWindow": 32768,
+    "arch": { "architecture": "qwen2", "layers": 28, "headCountKv": 4, "keyLength": 128, "valueLength": 128, "contextLength": 32768, "vocabSize": 152064 },
     "categories": ["general", "coding", "multilingual"],
     "qualityTier": "strong",
     "qualityScore": 78,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4500, "qualityRetention": 0.92 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4466, "qualityRetention": 0.92, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 5300, "qualityRetention": 0.95 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 7800, "qualityRetention": 0.99 }
     ],
@@ -137,12 +143,13 @@
     "name": "Qwen 2.5 14B",
     "provider": "Alibaba",
     "parametersBillion": 14,
-    "contextWindow": 131072,
+    "contextWindow": 32768,
+    "arch": { "architecture": "qwen2", "layers": 48, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 32768, "vocabSize": 152064 },
     "categories": ["general", "coding", "multilingual"],
     "qualityTier": "strong",
     "qualityScore": 85,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8500, "qualityRetention": 0.91 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8572, "qualityRetention": 0.91, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 10000, "qualityRetention": 0.94 }
     ],
     "ollamaTag": "qwen2.5:14b",
@@ -153,12 +160,13 @@
     "name": "Qwen 2.5 32B",
     "provider": "Alibaba",
     "parametersBillion": 32,
-    "contextWindow": 131072,
+    "contextWindow": 32768,
+    "arch": { "architecture": "qwen2", "layers": 64, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 32768, "vocabSize": 152064 },
     "categories": ["general", "coding", "multilingual"],
     "qualityTier": "frontier",
     "qualityScore": 91,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 19000, "qualityRetention": 0.90 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 18932, "qualityRetention": 0.90, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 23000, "qualityRetention": 0.93 }
     ],
     "ollamaTag": "qwen2.5:32b",
@@ -169,12 +177,13 @@
     "name": "Qwen 2.5 72B",
     "provider": "Alibaba",
     "parametersBillion": 72,
-    "contextWindow": 131072,
+    "contextWindow": 32768,
+    "arch": { "architecture": "qwen2", "layers": 80, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "vocabSize": 152064, "contextLength": 32768 },
     "categories": ["general", "coding", "multilingual"],
     "qualityTier": "frontier",
     "qualityScore": 96,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 42000, "qualityRetention": 0.89 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 45219, "qualityRetention": 0.89, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 50000, "qualityRetention": 0.92 }
     ],
     "ollamaTag": "qwen2.5:72b",
@@ -185,12 +194,13 @@
     "name": "Qwen 2.5 Coder 7B",
     "provider": "Alibaba",
     "parametersBillion": 7,
-    "contextWindow": 131072,
+    "contextWindow": 32768,
+    "arch": { "architecture": "qwen2", "layers": 28, "headCountKv": 4, "keyLength": 128, "valueLength": 128, "contextLength": 32768, "vocabSize": 152064 },
     "categories": ["coding"],
     "qualityTier": "strong",
     "qualityScore": 83,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4500, "qualityRetention": 0.92 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4466, "qualityRetention": 0.92, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 5300, "qualityRetention": 0.95 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 7800, "qualityRetention": 0.99 }
     ],
@@ -202,12 +212,13 @@
     "name": "Qwen 2.5 Coder 14B",
     "provider": "Alibaba",
     "parametersBillion": 14,
-    "contextWindow": 131072,
+    "contextWindow": 32768,
+    "arch": { "architecture": "qwen2", "layers": 48, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 32768, "vocabSize": 152064 },
     "categories": ["coding"],
     "qualityTier": "strong",
     "qualityScore": 89,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8500, "qualityRetention": 0.91 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8572, "qualityRetention": 0.91, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 10000, "qualityRetention": 0.94 }
     ],
     "ollamaTag": "qwen2.5-coder:14b",
@@ -219,11 +230,12 @@
     "provider": "Mistral AI",
     "parametersBillion": 7,
     "contextWindow": 32768,
+    "arch": { "architecture": "llama", "layers": 32, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 32768, "vocabSize": 32768 },
     "categories": ["general"],
     "qualityTier": "good",
     "qualityScore": 72,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4500, "qualityRetention": 0.92 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4170, "qualityRetention": 0.92, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 5300, "qualityRetention": 0.95 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 7800, "qualityRetention": 0.99 }
     ],
@@ -236,10 +248,12 @@
     "provider": "Mistral AI",
     "parametersBillion": 46.7,
     "contextWindow": 32768,
+    "arch": { "architecture": "llama", "layers": 32, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 32768, "vocabSize": 32000 },
     "categories": ["general", "coding"],
     "qualityTier": "strong",
     "qualityScore": 84,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 25219, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 26000, "qualityRetention": 0.90 },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 31000, "qualityRetention": 0.93 }
     ],
@@ -251,12 +265,13 @@
     "name": "Phi-3 Mini 3.8B",
     "provider": "Microsoft",
     "parametersBillion": 3.8,
-    "contextWindow": 128000,
-    "kvMbPer1kTokens": 375,
+    "contextWindow": 131072,
+    "arch": { "architecture": "phi3", "layers": 32, "headCountKv": 32, "keyLength": 96, "valueLength": 96, "slidingWindow": 262144, "contextLength": 131072, "vocabSize": 32064 },
     "categories": ["general", "reasoning"],
     "qualityTier": "good",
     "qualityScore": 68,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 2075, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 2500, "qualityRetention": 0.92 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 4200, "qualityRetention": 0.99 },
       { "name": "F16", "bitsPerWeight": 16, "vramMb": 7600, "qualityRetention": 1.0 }
@@ -269,11 +284,13 @@
     "name": "Phi-3 Medium 14B",
     "provider": "Microsoft",
     "parametersBillion": 14,
-    "contextWindow": 128000,
+    "contextWindow": 131072,
+    "arch": { "architecture": "phi3", "layers": 40, "headCountKv": 10, "keyLength": 128, "valueLength": 128, "slidingWindow": 131072, "contextLength": 131072, "vocabSize": 32064 },
     "categories": ["general", "reasoning"],
     "qualityTier": "strong",
     "qualityScore": 79,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 7531, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8500, "qualityRetention": 0.91 },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 10000, "qualityRetention": 0.94 }
     ],
@@ -286,12 +303,12 @@
     "provider": "Microsoft",
     "parametersBillion": 14,
     "contextWindow": 16384,
+    "arch": { "architecture": "phi3", "layers": 40, "headCountKv": 10, "keyLength": 128, "valueLength": 128, "slidingWindow": 131072, "contextLength": 16384, "vocabSize": 100352 },
     "categories": ["general", "reasoning", "coding"],
     "qualityTier": "strong",
     "qualityScore": 86,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8500, "qualityRetention": 0.91 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 10000, "qualityRetention": 0.94 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8634, "qualityRetention": 0.91, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 15000, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "phi4:14b",
@@ -303,11 +320,12 @@
     "provider": "Google",
     "parametersBillion": 2,
     "contextWindow": 8192,
-    "kvMbPer1kTokens": 102,
+    "arch": { "architecture": "gemma2", "layers": 26, "headCountKv": 4, "keyLength": 256, "valueLength": 256, "slidingWindow": 4096, "contextLength": 8192, "vocabSize": 256000 },
     "categories": ["general"],
     "qualityTier": "lightweight",
     "qualityScore": 48,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 1554, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 1500, "qualityRetention": 0.91 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 2500, "qualityRetention": 0.99 }
     ],
@@ -320,11 +338,12 @@
     "provider": "Google",
     "parametersBillion": 9,
     "contextWindow": 8192,
-    "kvMbPer1kTokens": 329,
+    "arch": { "architecture": "gemma2", "layers": 42, "headCountKv": 8, "keyLength": 256, "valueLength": 256, "slidingWindow": 4096, "contextLength": 8192, "vocabSize": 256000 },
     "categories": ["general"],
     "qualityTier": "strong",
     "qualityScore": 76,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 5191, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 5500, "qualityRetention": 0.92 },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 6500, "qualityRetention": 0.95 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 9500, "qualityRetention": 0.99 }
@@ -338,10 +357,12 @@
     "provider": "Google",
     "parametersBillion": 27,
     "contextWindow": 8192,
+    "arch": { "architecture": "gemma2", "layers": 46, "headCountKv": 16, "keyLength": 128, "valueLength": 128, "slidingWindow": 4096, "contextLength": 8192, "vocabSize": 256000 },
     "categories": ["general"],
     "qualityTier": "strong",
     "qualityScore": 88,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 14904, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 16000, "qualityRetention": 0.90 },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 19000, "qualityRetention": 0.93 }
     ],
@@ -354,11 +375,12 @@
     "provider": "Meta",
     "parametersBillion": 7,
     "contextWindow": 16384,
-    "kvMbPer1kTokens": 500,
+    "arch": { "architecture": "llama", "layers": 32, "headCountKv": 32, "keyLength": 128, "valueLength": 128, "contextLength": 16384, "vocabSize": 32016 },
     "categories": ["coding"],
     "qualityTier": "good",
     "qualityScore": 65,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 3649, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4500, "qualityRetention": 0.92 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 7800, "qualityRetention": 0.99 }
     ],
@@ -371,11 +393,12 @@
     "provider": "Meta",
     "parametersBillion": 13,
     "contextWindow": 16384,
-    "kvMbPer1kTokens": 782,
+    "arch": { "architecture": "llama", "layers": 40, "headCountKv": 40, "keyLength": 128, "valueLength": 128, "contextLength": 16384, "vocabSize": 32016 },
     "categories": ["coding"],
     "qualityTier": "good",
     "qualityScore": 73,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 7025, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8000, "qualityRetention": 0.91 },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 9500, "qualityRetention": 0.94 }
     ],
@@ -387,11 +410,13 @@
     "name": "DeepSeek Coder V2 Lite 16B",
     "provider": "DeepSeek",
     "parametersBillion": 16,
-    "contextWindow": 131072,
+    "contextWindow": 163840,
+    "arch": { "architecture": "deepseek2", "layers": 27, "headCountKv": 16, "keyLength": 192, "valueLength": 128, "contextLength": 163840, "vocabSize": 102400 },
     "categories": ["coding"],
     "qualityTier": "strong",
     "qualityScore": 81,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 8493, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 9500, "qualityRetention": 0.91 },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 11500, "qualityRetention": 0.94 }
     ],
@@ -404,10 +429,12 @@
     "provider": "01.AI",
     "parametersBillion": 9,
     "contextWindow": 4096,
+    "arch": { "architecture": "llama", "layers": 48, "headCountKv": 4, "keyLength": 128, "valueLength": 128, "contextLength": 4096, "vocabSize": 64000 },
     "categories": ["general", "multilingual"],
     "qualityTier": "good",
     "qualityScore": 70,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 4804, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 5500, "qualityRetention": 0.92 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 9500, "qualityRetention": 0.99 }
     ],
@@ -420,10 +447,12 @@
     "provider": "BigCode",
     "parametersBillion": 7,
     "contextWindow": 16384,
+    "arch": { "architecture": "starcoder2", "layers": 32, "headCountKv": 4, "keyLength": 128, "valueLength": 128, "contextLength": 16384, "vocabSize": 49152 },
     "categories": ["coding"],
     "qualityTier": "good",
     "qualityScore": 67,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 3856, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4500, "qualityRetention": 0.92 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 7800, "qualityRetention": 0.99 }
     ],
@@ -436,10 +465,12 @@
     "provider": "Community",
     "parametersBillion": 1.1,
     "contextWindow": 2048,
+    "arch": { "architecture": "llama", "layers": 22, "headCountKv": 4, "keyLength": 64, "valueLength": 64, "contextLength": 2048, "vocabSize": 32000 },
     "categories": ["general"],
     "qualityTier": "lightweight",
     "qualityScore": 30,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 608, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 700, "qualityRetention": 0.90 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 1200, "qualityRetention": 0.99 }
     ],
@@ -451,12 +482,13 @@
     "name": "Nomic Embed Text",
     "provider": "Nomic AI",
     "parametersBillion": 0.137,
-    "contextWindow": 8192,
+    "contextWindow": 2048,
+    "arch": { "architecture": "nomic-bert", "layers": 12, "headCountKv": 12, "keyLength": 64, "valueLength": 64, "contextLength": 2048, "vocabSize": 30522 },
     "categories": ["general"],
     "qualityTier": "lightweight",
     "qualityScore": 40,
     "quantizations": [
-      { "name": "F16", "bitsPerWeight": 16, "vramMb": 300, "qualityRetention": 1.0 }
+      { "name": "F16", "bitsPerWeight": 16, "vramMb": 262, "qualityRetention": 1.0, "exact": true }
     ],
     "ollamaTag": "nomic-embed-text",
     "releaseDate": "2024-02"
@@ -467,11 +499,12 @@
     "provider": "Meta",
     "parametersBillion": 70,
     "contextWindow": 131072,
+    "arch": { "architecture": "llama", "layers": 80, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 131072, "vocabSize": 128256 },
     "categories": ["general", "coding", "reasoning"],
     "qualityTier": "frontier",
     "qualityScore": 97,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 40000, "qualityRetention": 0.90 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 40551, "qualityRetention": 0.90, "exact": true },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 47000, "qualityRetention": 0.93 }
     ],
     "ollamaTag": "llama3.3:70b",
@@ -482,12 +515,13 @@
     "name": "Command R 7B",
     "provider": "Cohere",
     "parametersBillion": 7,
-    "contextWindow": 131072,
+    "contextWindow": 8192,
+    "arch": { "architecture": "cohere2", "layers": 32, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "slidingWindow": 4096, "contextLength": 8192, "vocabSize": 256000 },
     "categories": ["general", "multilingual"],
     "qualityTier": "good",
     "qualityScore": 69,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4500, "qualityRetention": 0.92 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4823, "qualityRetention": 0.92, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 7800, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "command-r7b",
@@ -498,12 +532,13 @@
     "name": "DeepSeek R1 Distill 1.5B",
     "provider": "DeepSeek",
     "parametersBillion": 1.5,
-    "contextWindow": 65536,
+    "contextWindow": 131072,
+    "arch": { "architecture": "qwen2", "layers": 28, "headCountKv": 2, "keyLength": 128, "valueLength": 128, "contextLength": 131072, "vocabSize": 151936 },
     "categories": ["reasoning"],
     "qualityTier": "lightweight",
     "qualityScore": 45,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 1000, "qualityRetention": 0.90 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 1066, "qualityRetention": 0.90, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 1700, "qualityRetention": 0.99 },
       { "name": "F16", "bitsPerWeight": 16, "vramMb": 3200, "qualityRetention": 1.0 }
     ],
@@ -520,7 +555,7 @@
     "qualityTier": "strong",
     "qualityScore": 79,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 7000, "qualityRetention": 0.91 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 7454, "qualityRetention": 0.91, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 12000, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "llama3.2-vision:11b",
@@ -531,11 +566,13 @@
     "name": "Mistral Small 22B",
     "provider": "Mistral AI",
     "parametersBillion": 22,
-    "contextWindow": 32768,
+    "contextWindow": 131072,
+    "arch": { "architecture": "llama", "layers": 56, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 131072, "vocabSize": 32768 },
     "categories": ["general", "coding", "reasoning"],
     "qualityTier": "strong",
     "qualityScore": 85,
     "quantizations": [
+      { "name": "Q4_0", "bitsPerWeight": 4.9, "vramMb": 11987, "qualityRetention": 0.931, "exact": true },
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 13000, "qualityRetention": 0.91 },
       { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 15500, "qualityRetention": 0.94 },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 23000, "qualityRetention": 0.99 }
@@ -549,13 +586,13 @@
     "provider": "Hugging Face",
     "parametersBillion": 1.7,
     "contextWindow": 8192,
-    "kvMbPer1kTokens": 188,
+    "arch": { "architecture": "llama", "layers": 24, "headCountKv": 32, "keyLength": 64, "valueLength": 64, "contextLength": 8192, "vocabSize": 49152 },
     "categories": ["general"],
     "qualityTier": "lightweight",
     "qualityScore": 42,
     "quantizations": [
       { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 1100, "qualityRetention": 0.91 },
-      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 1900, "qualityRetention": 0.99 }
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 1736, "qualityRetention": 0.99, "exact": true }
     ],
     "ollamaTag": "smollm2:1.7b",
     "releaseDate": "2024-11"
@@ -566,11 +603,12 @@
     "provider": "Google",
     "parametersBillion": 1,
     "contextWindow": 32768,
+    "arch": { "architecture": "gemma3", "layers": 26, "headCountKv": 1, "keyLength": 256, "valueLength": 256, "slidingWindow": 512, "contextLength": 32768, "vocabSize": 262144 },
     "categories": ["general"],
     "qualityTier": "lightweight",
     "qualityScore": 38,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 800, "qualityRetention": 0.90 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 769, "qualityRetention": 0.90, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 1400, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "gemma3:1b",
@@ -581,13 +619,13 @@
     "name": "Gemma 3 4B",
     "provider": "Google",
     "parametersBillion": 4,
-    "contextWindow": 128000,
-    "kvMbPer1kTokens": 133,
+    "contextWindow": 131072,
+    "arch": { "architecture": "gemma3", "layers": 34, "headCountKv": 4, "keyLength": 256, "valueLength": 256, "slidingWindow": 1024, "contextLength": 131072, "vocabSize": 262145 },
     "categories": ["general", "coding"],
     "qualityTier": "good",
     "qualityScore": 65,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 2800, "qualityRetention": 0.91 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 3195, "qualityRetention": 0.91, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 4500, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "gemma3:4b",
@@ -598,14 +636,13 @@
     "name": "Gemma 3 12B",
     "provider": "Google",
     "parametersBillion": 12,
-    "contextWindow": 128000,
-    "kvMbPer1kTokens": 375,
+    "contextWindow": 131072,
+    "arch": { "architecture": "gemma3", "layers": 48, "headCountKv": 8, "keyLength": 256, "valueLength": 256, "slidingWindow": 1024, "contextLength": 131072, "vocabSize": 262145 },
     "categories": ["general", "coding"],
     "qualityTier": "strong",
     "qualityScore": 82,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 7500, "qualityRetention": 0.91 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 9000, "qualityRetention": 0.94 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 7786, "qualityRetention": 0.91, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 13000, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "gemma3:12b",
@@ -616,14 +653,14 @@
     "name": "Gemma 3 27B",
     "provider": "Google",
     "parametersBillion": 27,
-    "contextWindow": 128000,
-    "kvMbPer1kTokens": 485,
+    "contextWindow": 131072,
+    "arch": { "architecture": "gemma3", "layers": 62, "headCountKv": 16, "keyLength": 128, "valueLength": 128, "slidingWindow": 1024, "contextLength": 131072, "vocabSize": 262145 },
     "categories": ["general", "coding", "reasoning"],
     "qualityTier": "strong",
     "qualityScore": 90,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 16500, "qualityRetention": 0.90 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 19500, "qualityRetention": 0.93 }
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 16607, "qualityRetention": 0.90, "exact": true },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 27361, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "gemma3:27b",
     "releaseDate": "2025-03"
@@ -633,13 +670,13 @@
     "name": "Qwen 3 0.6B",
     "provider": "Alibaba",
     "parametersBillion": 0.6,
-    "contextWindow": 32768,
-    "kvMbPer1kTokens": 110,
+    "contextWindow": 40960,
+    "arch": { "architecture": "qwen3", "layers": 28, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 40960, "vocabSize": 151936 },
     "categories": ["general"],
     "qualityTier": "lightweight",
     "qualityScore": 28,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 500, "qualityRetention": 0.89 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 498, "qualityRetention": 0.89, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 800, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "qwen3:0.6b",
@@ -650,13 +687,13 @@
     "name": "Qwen 3 1.7B",
     "provider": "Alibaba",
     "parametersBillion": 1.7,
-    "contextWindow": 32768,
-    "kvMbPer1kTokens": 110,
+    "contextWindow": 40960,
+    "arch": { "architecture": "qwen3", "layers": 28, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 40960, "vocabSize": 151936 },
     "categories": ["general"],
     "qualityTier": "lightweight",
     "qualityScore": 46,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 1100, "qualityRetention": 0.90 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 1296, "qualityRetention": 0.90, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 1900, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "qwen3:1.7b",
@@ -667,13 +704,13 @@
     "name": "Qwen 3 4B",
     "provider": "Alibaba",
     "parametersBillion": 4,
-    "contextWindow": 131072,
-    "kvMbPer1kTokens": 141,
+    "contextWindow": 262144,
+    "arch": { "architecture": "qwen3", "layers": 36, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 262144, "vocabSize": 151936 },
     "categories": ["general", "coding"],
     "qualityTier": "good",
     "qualityScore": 68,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 2800, "qualityRetention": 0.91 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 2382, "qualityRetention": 0.91, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 4500, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "qwen3:4b",
@@ -684,13 +721,13 @@
     "name": "Qwen 3 8B",
     "provider": "Alibaba",
     "parametersBillion": 8,
-    "contextWindow": 131072,
+    "contextWindow": 40960,
+    "arch": { "architecture": "qwen3", "layers": 36, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 40960, "vocabSize": 151936 },
     "categories": ["general", "coding", "reasoning", "multilingual"],
     "qualityTier": "strong",
     "qualityScore": 84,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 5000, "qualityRetention": 0.92 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 5800, "qualityRetention": 0.95 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 4983, "qualityRetention": 0.92, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 8500, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "qwen3:8b",
@@ -701,13 +738,14 @@
     "name": "Qwen 3 14B",
     "provider": "Alibaba",
     "parametersBillion": 14,
-    "contextWindow": 131072,
+    "contextWindow": 40960,
+    "arch": { "architecture": "qwen3", "layers": 40, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 40960, "vocabSize": 151936 },
     "categories": ["general", "coding", "reasoning", "multilingual"],
     "qualityTier": "strong",
     "qualityScore": 89,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8500, "qualityRetention": 0.91 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 10000, "qualityRetention": 0.94 }
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 8846, "qualityRetention": 0.91, "exact": true },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 14187, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "qwen3:14b",
     "releaseDate": "2025-04"
@@ -717,13 +755,14 @@
     "name": "Qwen 3 32B",
     "provider": "Alibaba",
     "parametersBillion": 32,
-    "contextWindow": 131072,
+    "contextWindow": 40960,
+    "arch": { "architecture": "qwen3", "layers": 64, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 40960, "vocabSize": 151936 },
     "categories": ["general", "coding", "reasoning", "multilingual"],
     "qualityTier": "frontier",
     "qualityScore": 93,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 19500, "qualityRetention": 0.90 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 23000, "qualityRetention": 0.93 }
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 19265, "qualityRetention": 0.90, "exact": true },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 32428, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "qwen3:32b",
     "releaseDate": "2025-04"
@@ -733,13 +772,13 @@
     "name": "Phi-4 Mini 3.8B",
     "provider": "Microsoft",
     "parametersBillion": 3.8,
-    "contextWindow": 128000,
-    "kvMbPer1kTokens": 125,
+    "contextWindow": 131072,
+    "arch": { "architecture": "phi3", "layers": 32, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "slidingWindow": 262144, "contextLength": 131072, "vocabSize": 200064 },
     "categories": ["general", "reasoning"],
     "qualityTier": "good",
     "qualityScore": 64,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 2500, "qualityRetention": 0.91 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 2376, "qualityRetention": 0.91, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 4200, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "phi4-mini",
@@ -750,13 +789,13 @@
     "name": "Mistral Small 3.1 24B",
     "provider": "Mistral AI",
     "parametersBillion": 24,
-    "contextWindow": 131072,
+    "contextWindow": 32768,
+    "arch": { "architecture": "llama", "layers": 40, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 32768, "vocabSize": 131072 },
     "categories": ["general", "coding", "reasoning"],
     "qualityTier": "strong",
     "qualityScore": 87,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 14500, "qualityRetention": 0.91 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 17000, "qualityRetention": 0.94 },
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 13670, "qualityRetention": 0.91, "exact": true },
       { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 25000, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "mistral-small:24b",
@@ -767,13 +806,14 @@
     "name": "QwQ 32B",
     "provider": "Alibaba",
     "parametersBillion": 32,
-    "contextWindow": 131072,
+    "contextWindow": 40960,
+    "arch": { "architecture": "qwen2", "layers": 64, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 40960, "vocabSize": 152064 },
     "categories": ["reasoning", "coding"],
     "qualityTier": "frontier",
     "qualityScore": 92,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 19500, "qualityRetention": 0.90 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 23000, "qualityRetention": 0.93 }
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 18932, "qualityRetention": 0.90, "exact": true },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 32428, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "qwq:32b",
     "releaseDate": "2025-03"
@@ -783,13 +823,14 @@
     "name": "Llama 4 Scout 109B",
     "provider": "Meta",
     "parametersBillion": 109,
-    "contextWindow": 131072,
+    "contextWindow": 10485760,
+    "arch": { "architecture": "llama4", "layers": 48, "headCountKv": 8, "keyLength": 128, "valueLength": 128, "contextLength": 10485760, "vocabSize": 202048 },
     "categories": ["general", "coding", "reasoning", "multilingual"],
     "qualityTier": "frontier",
     "qualityScore": 94,
     "quantizations": [
-      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 65000, "qualityRetention": 0.89 },
-      { "name": "Q5_K_M", "bitsPerWeight": 5.69, "vramMb": 77000, "qualityRetention": 0.92 }
+      { "name": "Q4_K_M", "bitsPerWeight": 4.83, "vramMb": 64313, "qualityRetention": 0.89, "exact": true },
+      { "name": "Q8_0", "bitsPerWeight": 8.5, "vramMb": 110458, "qualityRetention": 0.99 }
     ],
     "ollamaTag": "llama4:scout",
     "releaseDate": "2025-04"

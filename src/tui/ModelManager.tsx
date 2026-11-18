@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Text, Box, useInput } from "ink";
 import type { MonitorSnapshot } from "../hardware/monitor.js";
+import { getModelByTag } from "../models/database.js";
+import { formatMb } from "../cli/ui/progress.js";
 import { parsePullLines, type PullStreamEvent } from "./pull-stream.js";
 
 interface ModelInfo {
@@ -18,16 +20,22 @@ interface PullProgress {
   downloading: boolean;
 }
 
+// Download size of the file `ollama pull <tag>` installs, from the curated catalog; "" when the tag has no exact row.
+function pullSizeText(tag: string): string {
+  const quant = getModelByTag(tag)?.quantizations.find((q) => q.exact);
+  return quant ? `, ${formatMb(quant.vramMb)}` : "";
+}
+
 // Suggested models to pull if not installed
 const SUGGESTED_MODELS = [
-  { tag: "llama3.2:3b", desc: "Llama 3.2 3B — fast & capable, ~2 GB" },
-  { tag: "llama3.1:8b", desc: "Llama 3.1 8B — great all-rounder, ~5 GB" },
-  { tag: "mistral:7b", desc: "Mistral 7B — strong reasoning, ~4 GB" },
-  { tag: "codellama:7b", desc: "Code Llama 7B — code generation, ~4 GB" },
-  { tag: "phi3:mini", desc: "Phi-3 Mini — small but smart, ~2 GB" },
-  { tag: "gemma2:2b", desc: "Gemma 2 2B — Google's compact model, ~2 GB" },
-  { tag: "qwen2.5:7b", desc: "Qwen 2.5 7B — multilingual, ~4 GB" },
-  { tag: "deepseek-coder-v2:16b", desc: "DeepSeek Coder V2 — coding beast, ~9 GB" },
+  { tag: "llama3.2:3b", desc: "Llama 3.2 3B — fast & capable" },
+  { tag: "llama3.1:8b", desc: "Llama 3.1 8B — great all-rounder" },
+  { tag: "mistral:7b", desc: "Mistral 7B — strong reasoning" },
+  { tag: "codellama:7b", desc: "Code Llama 7B — code generation" },
+  { tag: "phi3:mini", desc: "Phi-3 Mini — small but smart" },
+  { tag: "gemma2:2b", desc: "Gemma 2 2B — Google's compact model" },
+  { tag: "qwen2.5:7b", desc: "Qwen 2.5 7B — multilingual" },
+  { tag: "deepseek-coder-v2:16b", desc: "DeepSeek Coder V2 — coding beast" },
 ];
 
 interface ModelManagerProps {
@@ -63,7 +71,7 @@ export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaH
         const sizeBytes = typeof m.size === "number" ? m.size : 0;
         return {
           name: String(m.name ?? ""),
-          size: `${(sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`,
+          size: `${(sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GiB`,
           family: String(details.family ?? "—"),
           quantization: String(details.quantization_level ?? "—"),
           parameterSize: String(details.parameter_size ?? "—"),
@@ -307,7 +315,7 @@ export const ModelManager = React.memo(function ModelManager({ snapshot, ollamaH
                   {i === selectedIdx ? "  \u25B6 " : "    "}
                 </Text>
                 <Text bold={i === selectedIdx} color={i === selectedIdx ? "white" : undefined}>
-                  {s.desc}
+                  {s.desc + pullSizeText(s.tag)}
                 </Text>
               </Text>
             ))

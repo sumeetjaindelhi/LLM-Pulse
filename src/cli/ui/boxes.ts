@@ -19,9 +19,28 @@ export function sectionHeader(title: string): string {
 
 export function keyValue(key: string, value: string, indent = 2): string {
   const pad = " ".repeat(indent);
-  return `${pad}${theme.label(key.padEnd(6))}${theme.value(value)}`;
+  return `${pad}${theme.label(`${key} `.padEnd(6))}${theme.value(value)}`;
 }
 
 export function subLine(text: string, indent = 8): string {
   return `${" ".repeat(indent)}${theme.muted(text)}`;
+}
+
+// Box content is 72 columns at 80-column terminals; a longer line puts boxen in wrap mode and strips every indent.
+export const BOX_CONTENT_COLUMNS = 72;
+
+/** `text` broken at spaces into sub-lines that fit the box; a word longer than the line gets its own line. */
+export function wrappedSubLines(text: string, indent = 8): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (line !== "" && indent + line.length + 1 + word.length > BOX_CONTENT_COLUMNS) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line === "" ? word : `${line} ${word}`;
+    }
+  }
+  if (line !== "") lines.push(line);
+  return lines.map((l) => subLine(l, indent));
 }

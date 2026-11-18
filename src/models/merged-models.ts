@@ -1,4 +1,4 @@
-import { getAllModels, getModelByTag } from "./database.js";
+import { getCuratedModels } from "./database.js";
 import { fetchOllamaModels } from "./ollama-models.js";
 import { getLibraryCatalog } from "./library-cache.js";
 import type {
@@ -20,7 +20,8 @@ export async function getMergedModels(
   const opts: MergeOptions =
     typeof hostOrOpts === "string" ? { ollamaHost: hostOrOpts } : hostOrOpts ?? {};
 
-  const dbModels = getAllModels();
+  // Curated rows only: live-catalog rows reach this view through the library pass below.
+  const dbModels = getCuratedModels();
   const ollamaPromise = fetchOllamaModels(opts.ollamaHost);
   const libraryPromise = opts.includeLibrary
     ? getLibraryCatalog({ refresh: opts.refresh ?? false })
@@ -91,11 +92,6 @@ export async function getMergedModels(
   // fine-tunes, sideloaded GGUFs, etc).
   for (const om of ollamaModels) {
     if (matchedOllamaTags.has(om.name)) continue;
-
-    // Try one more time: the Ollama tag might match a curated entry by tag
-    // (e.g. "llama3.1:latest" after redirect). getModelByTag handles this.
-    const curatedByTag = getModelByTag(om.name);
-    if (curatedByTag) continue;
 
     merged.push({
       entry: null,

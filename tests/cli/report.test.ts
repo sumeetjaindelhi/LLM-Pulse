@@ -6,7 +6,8 @@ import { runDiagnostics } from "../../src/analysis/doctor.js";
 import { getRecommendations } from "../../src/analysis/recommender.js";
 import { getAvailableVram } from "../../src/analysis/scorer.js";
 import { theme } from "../../src/cli/ui/colors.js";
-import { formatMb } from "../../src/cli/ui/progress.js";
+import { formatNeed } from "../../src/cli/ui/progress.js";
+import { memoryBreakdown } from "../../src/analysis/context-capacity.js";
 import type { HardwareProfile, RuntimeInfo } from "../../src/core/types.js";
 import highEnd from "../fixtures/hardware-profiles/high-end-nvidia.json";
 import windowsNvidia from "../fixtures/hardware-profiles/windows-nvidia.json";
@@ -61,11 +62,20 @@ describe("renderMarkdownReport — hardware", () => {
   it("renders the NVIDIA hardware table", () => {
     const md = renderMarkdownReport(input(HIGH_END, withOllama));
     expect(md).toContain("| CPU | AMD Ryzen 9 7950X · 16 cores / 32 threads · AVX2 |");
-    expect(md).toContain("| GPU | NVIDIA GeForce RTX 4090 · 24.0 GB VRAM · CUDA 12.5 |");
-    expect(md).toContain("| RAM | 64.0 GB DDR5 @ 5600 MHz |");
-    expect(md).toContain("| Disk | NVMe · 1200 GB free |");
-    expect(md).toContain("| Usable for inference | 24.0 GB |");
+    expect(md).toContain("| GPU | NVIDIA GeForce RTX 4090 · 24.0 GiB VRAM · CUDA 12.5 |");
+    expect(md).toContain("| RAM | 64.0 GiB DDR5 @ 5600 MHz |");
+    expect(md).toContain("| Disk | NVMe · 1200 GiB free |");
+    // Rule: discrete budget = 24576 - 457 - 1024 = 23095 MiB = 22.6 GiB.
+    expect(md).toContain("| Usable for inference | 22.6 GiB est. |");
     expect(md).not.toContain("Unified memory");
+  });
+
+  // Two 24576 MiB cards: usable 2 x (24576 - 457 - 1024) = 46190 MiB = 45.1 GiB, raw VRAM 49152 MiB = 48.0 GiB.
+  it("names every GPU the usable budget sums", () => {
+    const two = { ...HIGH_END, gpus: [HIGH_END.gpus[0], HIGH_END.gpus[0]] };
+    const md = renderMarkdownReport(input(two, noRuntimes));
+    expect(md).toContain("| GPU | 2× NVIDIA GeForce RTX 4090 · 48.0 GiB VRAM");
+    expect(md).toContain("| Usable for inference | 45.1 GiB est. |");
   });
 
   it("does not repeat the vendor when the model name already starts with it", () => {
@@ -77,16 +87,17 @@ describe("renderMarkdownReport — hardware", () => {
   it("renders a CPU-only machine with system RAM as the usable pool", () => {
     const md = renderMarkdownReport(input(CPU_ONLY, noRuntimes));
     expect(md).toContain("| GPU | None — CPU inference |");
-    expect(md).toContain("| Usable for inference | 9.8 GB |");
+    expect(md).toContain("| Usable for inference | 9.8 GiB |");
   });
 
-  it("renders Apple Silicon with NEON, the headroom-adjusted pool and the unified memory note", () => {
+  it("renders Apple Silicon with NEON, the Metal budget and the working-set note", () => {
     const md = renderMarkdownReport(input(APPLE_M2, withOllama));
     const cpuRow = lines(md).find((line) => line.startsWith("| CPU |"));
     expect(cpuRow?.endsWith("· NEON |")).toBe(true);
-    expect(md).toContain("| GPU | Apple M2 Pro · 10.7 GB VRAM |");
-    expect(md).toContain("| Usable for inference | 4.7 GB |");
-    expect(md).toContain("Unified memory — estimate reserves ~6 GB");
+    expect(md).toContain("| GPU | Apple M2 Pro · 10.7 GiB VRAM |");
+    // Rule: budget = 10977 - 1024 = 9953 MiB = 9.7 GiB (no extra unified headroom).
+    expect(md).toContain("| Usable for inference | 9.7 GiB |");
+    expect(md).toContain("Metal working set — macOS keeps the rest for the system");
     expect(md).not.toContain("75%");
   });
 });
@@ -150,12 +161,15 @@ describe("renderMarkdownReport — recommendations", () => {
   it("fills the recommendation row from the model score", () => {
     const report = input(HIGH_END, withOllama);
     const { score } = report.recommendations[0];
-    const row = lines(renderMarkdownReport(report)).find((line) => line.startsWith("| 1 |"));
+    const md = renderMarkdownReport(report);
+    const row = lines(md).find((line) => line.startsWith("| 1 |"));
     expect(row).toContain(`| ${score.model.name} |`);
     expect(row).toContain(`| ${score.quantization.name} |`);
     expect(row).toContain(`| ${score.fitLevel} |`);
-    expect(row).toContain(`| ${formatMb(score.quantization.vramMb)} |`);
+    expect(row).toContain(`| ${formatNeed(memoryBreakdown(score.model, score.quantization, HIGH_END))} |`);
     expect(row).toContain(`| ${score.speedEstimate} |`);
+    expect(md).toContain("| # | Model | Quant | Fit | Need | Speed | Installed |");
+    expect(md).toContain("_Need: weights + KV cache + compute (≈) at Ollama's default context. Speed: rough (decode is bandwidth-bound); measure: llm-pulse benchmark._");
   });
 
   it("replaces the table with an empty-state line when nothing is recommended", () => {

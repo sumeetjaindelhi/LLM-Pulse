@@ -36,6 +36,10 @@ export const DOCTOR_WEIGHTS = {
   coreCount: 10,
 } as const;
 
+// Ollama's guidance: web search, agents and coding tools need at least this many
+// tokens of context.
+export const AGENT_MIN_CONTEXT = 64000;
+
 // Minimum requirements for warnings
 export const MIN_REQUIREMENTS = {
   ramMb: 8192, // 8 GB
@@ -51,14 +55,6 @@ export const MIN_REQUIREMENTS = {
 // can be read, and it deliberately errs low: an overestimate produces "fits"
 // verdicts on models that OOM during real inference.
 export const APPLE_UNIFIED_MEMORY_FACTOR_FALLBACK = 0.67;
-
-// On unified-memory systems, the sysctl GPU-wired limit is the theoretical
-// ceiling, but real-world usage has to share with the OS, IDE, Node, and
-// every other app drawing from the same RAM pool. Subtracting this flat
-// headroom from the max-params estimate keeps the "you can run up to NB"
-// tip honest for daily-driver machines. 6 GB covers a modern dev setup
-// (OS + browser + editor + Node + small tools) with margin for spikes.
-export const UNIFIED_MEMORY_HEADROOM_MB = 6144;
 
 // Runtime detection
 export const OLLAMA_API_URL = "http://127.0.0.1:11434";

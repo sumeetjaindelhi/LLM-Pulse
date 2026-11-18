@@ -91,7 +91,7 @@ export async function profileCommand(options: ProfileOptions): Promise<void> {
     if (result) {
       results.push(result);
       roundSpinner?.succeed(
-        `  ${label}: ${theme.number(`${result.tokensPerSec.toFixed(1)} tok/s`)}  TTFT: ${theme.number(`${result.ttftMs}ms`)}  Peak VRAM: ${result.peakVramMb !== null ? theme.number(`${result.peakVramMb} MB`) : theme.muted("n/a")}`,
+        `  ${label}: ${theme.number(`${result.tokensPerSec.toFixed(1)} tok/s`)}  TTFT: ${theme.number(`${result.ttftMs}ms`)}  Peak VRAM: ${result.peakVramMb !== null ? theme.number(`${result.peakVramMb} MiB`) : theme.muted("n/a")}`,
       );
     } else {
       roundSpinner?.fail(`  ${label}: failed`);
@@ -374,7 +374,7 @@ function outputResults(results: ProfileResult[], format: OutputFormat): void {
     console.log(`    Tokens generated:  ${theme.number(String(r.tokensGenerated))}`);
     console.log(`    Tokens/sec:        ${theme.pass(`${r.tokensPerSec.toFixed(1)}`)}`);
     console.log(`  ${theme.muted("Memory:")}`);
-    console.log(`    Peak VRAM:         ${r.peakVramMb !== null ? theme.number(`${r.peakVramMb} MB`) : theme.muted("n/a")}`);
+    console.log(`    Peak VRAM:         ${r.peakVramMb !== null ? theme.number(`${r.peakVramMb} MiB`) : theme.muted("n/a")}`);
     console.log(`  ${theme.muted("Avg GPU % by phase:")}`);
     for (const phase of ["idle", "prompt", "generation"] as const) {
       const val = r.avgGpuByPhase[phase];

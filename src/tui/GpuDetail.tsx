@@ -41,7 +41,7 @@ export const GpuDetail = React.memo(function GpuDetail({ snapshot, gpuHistory, g
 
   const vramStr =
     snapshot.gpuVramUsedMb !== null && snapshot.gpuVramTotalMb !== null
-      ? `${(snapshot.gpuVramUsedMb / 1024).toFixed(1)}/${(snapshot.gpuVramTotalMb / 1024).toFixed(1)} GB`
+      ? `${(snapshot.gpuVramUsedMb / 1024).toFixed(1)}/${(snapshot.gpuVramTotalMb / 1024).toFixed(1)} GiB`
       : "";
 
   const header = snapshot.gpuVendor || snapshot.gpuModel

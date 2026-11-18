@@ -2,12 +2,14 @@ import ora from "ora";
 import { detectHardware } from "../../hardware/index.js";
 import { checkContextFit } from "../../analysis/context-fit.js";
 import { getAvailableVram } from "../../analysis/scorer.js";
-import { resolveModel } from "../../models/database.js";
-import { titleBox, sectionHeader, keyValue } from "../ui/boxes.js";
+import { findQuant, resolveModel } from "../../models/database.js";
+import { withExactFacts } from "../../runtimes/ollama.js";
+import { resolveOllamaHost } from "../../core/config.js";
+import { titleBox, sectionHeader, keyValue, subLine, wrappedSubLines } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
-import { formatMb } from "../ui/progress.js";
+import { formatBreakdown, formatMb, formatNeedAt, formatUsable, gpuRows } from "../ui/progress.js";
 import { renderModelNotFound } from "../ui/errors.js";
-import { toCsv } from "../ui/csv.js";
+import { MEMORY_CSV_HEADERS, memoryCsvCells, toCsv } from "../ui/csv.js";
 import type {
   ContextFitOptions,
   ContextFitResult,
@@ -21,7 +23,7 @@ export function toContextFitCsv(result: ContextFitResult): string {
   const headers = [
     "model", "quant", "quantForced", "promptTokens", "responseTokens", "neededTokens",
     "nativeWindow", "affordedByVramTokens", "effectiveMaxTokens", "limitedBy", "verdict",
-    "headroomTokens", "remedy",
+    "headroomTokens", "remedy", ...MEMORY_CSV_HEADERS,
   ];
   const row: (string | number | boolean)[] = [
     result.model.id,
@@ -37,6 +39,7 @@ export function toContextFitCsv(result: ContextFitResult): string {
     result.verdict,
     result.headroomTokens,
     result.remedy ?? "",
+    ...memoryCsvCells(result.memory),
   ];
   return toCsv(headers, [row]);
 }
@@ -61,21 +64,26 @@ function outputTable(result: ContextFitResult, hardware: HardwareProfile, availa
   lines.push(`  ${theme.number(result.promptTokens.toLocaleString())} prompt ${theme.muted("+")} ${theme.number(result.responseTokens.toLocaleString())} response ${theme.muted("=")} ${theme.number(result.neededTokens.toLocaleString())} tokens`);
 
   lines.push(sectionHeader("Hardware"));
-  if (hardware.primaryGpu) {
-    lines.push(keyValue("GPU", `${hardware.primaryGpu.model} · ${formatMb(availableVramMb)}`));
-  } else {
-    lines.push(keyValue("Memory", `${formatMb(availableVramMb)} usable (CPU inference)`));
-  }
+  lines.push(...gpuRows(hardware, availableVramMb, keyValue("Memory", `${formatMb(availableVramMb)} usable (CPU inference)`)));
+
+  lines.push(sectionHeader("Memory need"));
+  lines.push(`  ${formatNeedAt(result.memory)}`);
+  lines.push(subLine(formatBreakdown(result.memory)));
+  lines.push(subLine(formatUsable(result.memory)));
 
   lines.push(sectionHeader("Ceilings"));
-  lines.push(keyValue("Native window", `${result.nativeWindow.toLocaleString()} tok`));
-  lines.push(keyValue("Hardware-afforded", `${result.affordedByVramTokens.toLocaleString()} tok`));
-  lines.push(keyValue("Effective max", `${result.effectiveMaxTokens.toLocaleString()} tok  (limited by ${result.limitedBy})`));
+  const nativeNote = result.nativeWindowEstimated ? "  (estimated, not enforced)" : "";
+  // These labels are wider than keyValue's 6-column pad, so pad them to a shared column.
+  const ceiling = (label: string, value: string) => keyValue(label.padEnd("Hardware-afforded ".length), value);
+  lines.push(ceiling("Native window", `${result.nativeWindow.toLocaleString()} tok${nativeNote}`));
+  lines.push(ceiling("Hardware-afforded", `${result.affordedByVramTokens.toLocaleString()} tok`));
+  lines.push(ceiling("Effective max", `${result.effectiveMaxTokens.toLocaleString()} tok  (limited by ${result.limitedBy})`));
 
   lines.push("");
   lines.push(`  ${verdictLabel(result)}`);
   if (result.remedy) {
-    lines.push(`  ${theme.label("Remedy")} ${theme.muted(result.remedy)}`);
+    lines.push(`  ${theme.label("Remedy")}`);
+    lines.push(...wrappedSubLines(result.remedy));
   }
 
   console.log(titleBox(lines.join("\n")));
@@ -93,18 +101,22 @@ export async function contextFitCommand(
   const hardware = await detectHardware();
   spinner?.succeed("Hardware detected");
 
-  const model = resolveModel(modelArg);
-  if (!model) {
+  const resolved = resolveModel(modelArg);
+  if (!resolved) {
     renderModelNotFound(modelArg, { silent });
     return;
   }
+  spinner?.start("Reading model facts...");
+  const model = await withExactFacts(resolveOllamaHost(), resolved);
+  spinner?.stop();
 
   // Resolve --quant if given; a typo is an error (with the available list) rather
   // than a silent fall-through to the sweet spot. Ordered before the 0-quant guard
   // to match the `check`/MCP path so all three surfaces report the same error.
+  // Matched after the facts lookup: the file's real size, and a library row's quant name, come from it.
   let forcedQuant: QuantizationVariant | undefined;
   if (options.quant) {
-    const match = model.quantizations.find((q) => q.name.toLowerCase() === options.quant!.toLowerCase());
+    const match = findQuant(model, options.quant);
     if (!match) {
       process.exitCode = 1;
       const payload = {

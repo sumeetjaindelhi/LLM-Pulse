@@ -1,76 +1,130 @@
+import { z } from "zod";
 import {
   fetchOllamaLibrary,
   LibraryCatalogSchema,
   type LibraryModel,
 } from "./ollama-library.js";
 import { readCache, writeCache, clearCacheEntry } from "../core/cache.js";
+import { isOffline } from "../core/config.js";
 import type { LibraryCatalogModel } from "../core/types.js";
 
 const CACHE_NAME = "ollama-library";
-const CACHE_VERSION = 1;
+const STATUS_NAME = "ollama-library-status";
+const CACHE_VERSION = 2;
+const STATUS_VERSION = 1;
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const FAILURE_BACKOFF_MS = 60 * 60 * 1000; // implicit refreshes pause after a failure
+const IMPLICIT_TIMEOUT_MS = 5_000;
+const EXPLICIT_TIMEOUT_MS = 10_000;
+// Disk entries are read at any age; the envelope's own expiry never applies.
+const NO_EXPIRY_MS = Number.MAX_SAFE_INTEGER;
 
 export interface GetLibraryOptions {
   refresh?: boolean;
 }
 
-let memo: LibraryModel[] | null = null;
-
-function toCatalog(models: LibraryModel[]): LibraryCatalogModel[] {
-  return models.map((m) => ({
-    slug: m.slug,
-    description: m.description,
-    parameterSizes: m.parameterSizes,
-    capabilities: m.capabilities,
-  }));
+export interface LibrarySnapshot {
+  cards: LibraryCatalogModel[];
+  fetchedAt: number;
 }
 
+const LibraryStatusSchema = z
+  .object({
+    lastAttemptAt: z.number().int().nonnegative(),
+    lastSuccessAt: z.number().int().nonnegative().nullable(),
+    lastError: z.string().max(512).nullable(),
+    cards: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type LibraryStatus = z.infer<typeof LibraryStatusSchema>;
+
+let memo: LibrarySnapshot | null = null;
+let inFlight: Promise<void> | null = null;
+
+export function readLibraryStatus(): LibraryStatus | null {
+  return readCache(STATUS_NAME, LibraryStatusSchema, { ttlMs: NO_EXPIRY_MS, version: STATUS_VERSION })?.data ?? null;
+}
+
+/** Cached catalog at any age, never touching the network. The memo keeps one array identity until a refresh replaces it. */
+export function readLibraryCatalogSync(): LibrarySnapshot | null {
+  if (memo) return memo;
+  const cached = readCache(CACHE_NAME, LibraryCatalogSchema, { ttlMs: NO_EXPIRY_MS, version: CACHE_VERSION });
+  if (!cached) return null;
+  memo = { cards: cached.data, fetchedAt: Date.now() - cached.ageMs };
+  return memo;
+}
+
+function isFresh(): boolean {
+  const snapshot = readLibraryCatalogSync();
+  return snapshot !== null && Date.now() - snapshot.fetchedAt < TTL_MS;
+}
+
+function isBackingOff(): boolean {
+  const status = readLibraryStatus();
+  return status !== null && status.lastError !== null && Date.now() - status.lastAttemptAt < FAILURE_BACKOFF_MS;
+}
+
+function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  // Node reports every network failure as "fetch failed"; the cause names it.
+  const cause = err.cause instanceof Error ? `: ${err.cause.message}` : "";
+  return `${err.message}${cause}`.slice(0, 512);
+}
+
+async function fetchAndStore(timeoutMs: number): Promise<void> {
+  const lastAttemptAt = Date.now();
+  try {
+    const fresh: LibraryModel[] = await fetchOllamaLibrary({ timeoutMs });
+    const fetchedAt = Date.now();
+    writeCache(CACHE_NAME, fresh, { ttlMs: TTL_MS, version: CACHE_VERSION });
+    memo = { cards: fresh, fetchedAt };
+    writeStatus({ lastAttemptAt, lastSuccessAt: fetchedAt, lastError: null, cards: fresh.length });
+  } catch (err) {
+    // A stale catalog beats none, so the cache and memo stay as they are.
+    // Read the status only now: another process may have succeeded meanwhile.
+    writeStatus({
+      lastAttemptAt,
+      lastSuccessAt: readLibraryStatus()?.lastSuccessAt ?? null,
+      lastError: describeError(err),
+      cards: readLibraryCatalogSync()?.cards.length ?? 0,
+    });
+  }
+}
+
+function writeStatus(status: LibraryStatus): void {
+  writeCache(STATUS_NAME, status, { ttlMs: NO_EXPIRY_MS, version: STATUS_VERSION });
+}
+
+// Never rejects. Concurrent callers share one fetch.
+function refresh(explicit: boolean, timeoutMs: number): Promise<void> {
+  if (isOffline() || inFlight) return inFlight ?? Promise.resolve();
+  if (!explicit && (isFresh() || isBackingOff())) return Promise.resolve();
+  inFlight = fetchAndStore(timeoutMs).finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+export function refreshLibraryCatalogIfStale(opts: { timeoutMs?: number } = {}): Promise<void> {
+  return refresh(false, opts.timeoutMs ?? IMPLICIT_TIMEOUT_MS);
+}
+
+/**
+ * Library paths are explicit requests: a stale or missing catalog is fetched
+ * with the longer timeout even during the failure backoff. A fresh cache skips
+ * the network unless `refresh: true` forces it.
+ */
 export async function getLibraryCatalog(
   opts: GetLibraryOptions = {},
 ): Promise<LibraryCatalogModel[]> {
-  const refresh = opts.refresh ?? false;
-
-  // A refresh skips the cached copy but leaves it on disk: it is the stale
-  // fallback if the fetch below fails, and a successful fetch overwrites it.
-  if (refresh) {
-    memo = null;
-  }
-
-  if (memo && !refresh) return toCatalog(memo);
-
-  if (!refresh) {
-    const cached = readCache(CACHE_NAME, LibraryCatalogSchema, {
-      ttlMs: TTL_MS,
-      version: CACHE_VERSION,
-    });
-    if (cached) {
-      memo = cached.data;
-      return toCatalog(memo);
-    }
-  }
-
-  try {
-    const fresh = await fetchOllamaLibrary();
-    memo = fresh;
-    writeCache(CACHE_NAME, fresh, { ttlMs: TTL_MS, version: CACHE_VERSION });
-    return toCatalog(fresh);
-  } catch {
-    // Fetch failed. If we have a stale cache, fall back to it rather than
-    // returning nothing — a day-old catalog beats no catalog for an offline
-    // user. The TTL check only applies to fresh fetches.
-    const stale = readCache(CACHE_NAME, LibraryCatalogSchema, {
-      ttlMs: Number.MAX_SAFE_INTEGER,
-      version: CACHE_VERSION,
-    });
-    if (stale) {
-      memo = stale.data;
-      return toCatalog(memo);
-    }
-    return [];
-  }
+  if (opts.refresh || !isFresh()) await refresh(true, EXPLICIT_TIMEOUT_MS);
+  return readLibraryCatalogSync()?.cards ?? [];
 }
 
 export function resetLibraryCache(): void {
   memo = null;
+  inFlight = null;
   clearCacheEntry(CACHE_NAME);
+  clearCacheEntry(STATUS_NAME);
 }

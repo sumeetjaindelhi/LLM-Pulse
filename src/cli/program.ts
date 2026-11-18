@@ -1,6 +1,7 @@
 import { Command, InvalidArgumentError, Option } from "commander";
 import { VERSION } from "../core/constants.js";
-import { CATEGORY_FILTERS, OUTPUT_FORMATS, loadConfig } from "../core/config.js";
+import { CATEGORY_FILTERS, OUTPUT_FORMATS, isOffline, loadConfig } from "../core/config.js";
+import { refreshLibraryCatalogIfStale } from "../models/library-cache.js";
 import { scanCommand } from "./commands/scan.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { modelsCommand } from "./commands/models.js";
@@ -26,6 +27,10 @@ function wholeNumberAtLeast(min: number): (value: string) => number {
   };
 }
 
+// Commands whose output depends on the model list. doctor, monitor, benchmark and profile
+// stay offline so a health check never waits on ollama.com.
+const CATALOG_COMMANDS = new Set(["scan", "models", "compare", "check", "quant-advice", "optimize", "context-fit", "report"]);
+
 export function createProgram(): Command {
   const config = loadConfig();
   const defaultFormat = config.defaultFormat ?? "table";
@@ -48,6 +53,17 @@ export function createProgram(): Command {
     .description("Zero-config CLI for monitoring your local LLM hardware, runtimes, and model compatibility")
     .version(VERSION)
     .enablePositionalOptions();
+
+  // Refresh the cached ollama.com catalog (5 s cap, never throws) before a model-listing command reads it.
+  program.hook("preAction", async (_program, actionCommand) => {
+    if (isOffline()) return;
+    const name = actionCommand === program ? "scan" : actionCommand.name();
+    if (!CATALOG_COMMANDS.has(name)) return;
+    // models --library / --refresh do their own explicit, longer fetch; --installed / --live never read the live catalog.
+    const opts = actionCommand.opts();
+    if (name === "models" && (opts.library || opts.refresh || opts.installed || opts.live)) return;
+    await refreshLibraryCatalogIfStale();
+  });
 
   // Default action (no subcommand) runs scan
   program

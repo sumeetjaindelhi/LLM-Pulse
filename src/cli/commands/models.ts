@@ -9,8 +9,9 @@ import { fitBadge } from "../ui/badges.js";
 import { sectionHeader } from "../ui/boxes.js";
 import { borderlessTableChars } from "../ui/tables.js";
 import { toCsv } from "../ui/csv.js";
-import { resolveOllamaHost } from "../../core/config.js";
-import type { ModelEntry, ModelCategory, HardwareProfile, MergedModel } from "../../core/types.js";
+import { formatWeights } from "../ui/progress.js";
+import { isOffline, resolveOllamaHost } from "../../core/config.js";
+import type { ModelEntry, ModelCategory, HardwareProfile, MergedModel, QuantizationVariant } from "../../core/types.js";
 
 interface ModelsOptions {
   search?: string;
@@ -43,7 +44,7 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
   }
 
   // Score and filter if needed
-  type ScoredModel = { model: ModelEntry; fitLabel: string; bestQuant: string; vramMb: number };
+  type ScoredModel = { model: ModelEntry; fitLabel: string; quant: QuantizationVariant };
   const scored: ScoredModel[] = [];
 
   for (const model of models) {
@@ -60,18 +61,15 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
         scored.push({
           model,
           fitLabel: fitBadge(best.fitLevel),
-          bestQuant: best.quantization.name,
-          vramMb: best.quantization.vramMb,
+          quant: best.quantization,
         });
       }
     } else {
       // No hardware filter — show smallest quant
-      const smallest = model.quantizations[0];
       scored.push({
         model,
         fitLabel: theme.muted("—"),
-        bestQuant: smallest.name,
-        vramMb: smallest.vramMb,
+        quant: model.quantizations[0],
       });
     }
   }
@@ -83,19 +81,20 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
       provider: s.model.provider,
       parametersBillion: s.model.parametersBillion,
       categories: s.model.categories,
-      quantization: s.bestQuant,
-      vramMb: s.vramMb,
+      quantization: s.quant.name,
+      vramMb: s.quant.vramMb,
       ollamaTag: s.model.ollamaTag,
+      weightsExact: s.quant.exact === true,
     }));
     console.log(JSON.stringify(output, null, 2));
     return;
   }
 
   if (options.format === "csv") {
-    const headers = ["id", "name", "provider", "parametersBillion", "categories", "quantization", "vramMb", "ollamaTag"];
+    const headers = ["id", "name", "provider", "parametersBillion", "categories", "quantization", "vramMb", "ollamaTag", "weightsExact"];
     const rows = scored.map((s) => [
       s.model.id, s.model.name, s.model.provider, s.model.parametersBillion,
-      s.model.categories.join(";"), s.bestQuant, s.vramMb, s.model.ollamaTag,
+      s.model.categories.join(";"), s.quant.name, s.quant.vramMb, s.model.ollamaTag, s.quant.exact === true,
     ]);
     console.log(toCsv(headers, rows));
     return;
@@ -117,7 +116,7 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
       theme.muted("Params"),
       theme.muted("Context"),
       theme.muted("Quant"),
-      theme.muted("VRAM"),
+      theme.muted("Weights"),
       theme.muted("Fit"),
       theme.muted("Categories"),
     ],
@@ -126,18 +125,18 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
   });
 
   for (const s of scored) {
-    const vramGb = (s.vramMb / 1024).toFixed(0);
-    const ctx = s.model.contextWindow >= 1024
+    const window = s.model.contextWindow >= 1024
       ? `${(s.model.contextWindow / 1024).toFixed(0)}K`
       : String(s.model.contextWindow);
+    const ctx = s.model.contextWindowEstimated ? `${window} est.` : window;
 
     table.push([
       theme.value(s.model.name),
       theme.muted(s.model.provider),
       theme.number(`${s.model.parametersBillion}B`),
       theme.muted(ctx),
-      theme.muted(s.bestQuant),
-      theme.number(`${vramGb} GB`),
+      theme.muted(s.quant.name),
+      theme.number(formatWeights(s.quant)),
       s.fitLabel,
       theme.muted(s.model.categories.join(", ")),
     ]);
@@ -150,11 +149,20 @@ export async function modelsCommand(options: ModelsOptions): Promise<void> {
 async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Promise<void> {
   const includeLibrary = options.library ?? false;
   const refresh = options.refresh ?? false;
-  const fetchLabel = includeLibrary
+  const libraryOff = includeLibrary && isOffline();
+  const fetchLabel = libraryOff
+    ? "Reading cached models..."
+    : includeLibrary
     ? refresh
       ? "Refreshing Ollama library catalog..."
       : "Fetching Ollama library catalog..."
     : "Fetching models from Ollama...";
+
+  // json/csv stdout must carry only the payload, so the note goes to stderr there.
+  if (libraryOff) {
+    const note = `The live library is off (LLMPULSE_OFFLINE or offline config); showing cached and local models only.`;
+    (options.format === "table" ? console.log : console.error)(`\n  ${theme.warning("⚠")} ${theme.warning(note)}`);
+  }
 
   const spinner = ora({ text: fetchLabel, color: "cyan" }).start();
 
@@ -289,7 +297,7 @@ async function liveModelsCommand(options: ModelsOptions, ollamaHost: string): Pr
       ?? m.entry?.quantizations[0]?.name
       ?? "—";
     const sizeGb = m.ollamaModel
-      ? `${(m.ollamaModel.size / 1024 / 1024 / 1024).toFixed(1)} GB`
+      ? `${(m.ollamaModel.size / 1024 / 1024 / 1024).toFixed(1)} GiB`
       : "—";
 
     // Fit label: score if DB entry + hardware, "unrated" if Ollama-only

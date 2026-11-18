@@ -3,12 +3,14 @@ import { detectAllRuntimes } from "../../runtimes/index.js";
 import { fetchOllamaModels } from "../../models/ollama-models.js";
 import { getRecommendations } from "../../analysis/recommender.js";
 import { runDiagnostics } from "../../analysis/doctor.js";
-import { getAvailableVram } from "../../analysis/scorer.js";
+import { budgetExact, budgetGpus, getAvailableVram, ignoredGpu, ignoredGpuLabel, unifiedMemoryNote } from "../../analysis/scorer.js";
 import { resolveOllamaHost } from "../../core/config.js";
-import { UNIFIED_MEMORY_HEADROOM_MB, VERSION } from "../../core/constants.js";
+import { VERSION } from "../../core/constants.js";
 import { SEVERITY_ICONS } from "../ui/badges.js";
 import { escapeMarkdownValue, toMarkdownTable } from "../ui/markdown.js";
-import { formatMb } from "../ui/progress.js";
+import { formatMb, formatNeed, formatUsableMb, gpuLabel, gpuNames } from "../ui/progress.js";
+import { NEED_NOTE, SPEED_NOTE } from "../ui/tables.js";
+import { memoryBreakdown } from "../../analysis/context-capacity.js";
 import type {
   GpuInfo,
   HardwareProfile,
@@ -53,16 +55,17 @@ function cpuDetail(hardware: HardwareProfile): string {
   return `${cpu.brand} · ${cpu.cores} cores / ${cpu.threads} threads · ${simd}`;
 }
 
-function gpuDetail(gpu: GpuInfo | null): string {
-  if (!gpu || gpu.vramMb === 0) return "None — CPU inference";
-  // Some drivers already include the vendor in the model string
-  // ("NVIDIA GeForce RTX 4090", "Apple M2 Pro"); don't print it twice.
-  const name = gpu.model.toLowerCase().startsWith(gpu.vendor.toLowerCase())
-    ? gpu.model
-    : `${gpu.vendor} ${gpu.model}`;
+// The GPUs the usable budget sums: "2× NVIDIA GeForce RTX 3090 · 48.0 GiB VRAM".
+function gpuDetail(hardware: HardwareProfile): string {
+  const ignored = ignoredGpu(hardware);
+  if (ignored) return ignoredGpuLabel(ignored);
+  const budget = budgetGpus(hardware);
+  if (budget.length === 0) return "None — CPU inference";
+  const gpu = budget[0];
   const label = gpu.acceleratorType ? ACCELERATOR_LABELS[gpu.acceleratorType] : undefined;
   const accelerator = label && gpu.acceleratorVersion ? ` · ${label} ${gpu.acceleratorVersion}` : "";
-  return `${name} · ${formatMb(gpu.vramMb)} VRAM${accelerator}`;
+  const vramMb = budget.length > 1 ? budget.reduce((sum, g) => sum + g.vramMb, 0) : gpu.vramMb;
+  return `${gpuNames(budget, gpuLabel)} · ${formatMb(vramMb)} VRAM${accelerator}`;
 }
 
 function memoryDetail(hardware: HardwareProfile): string {
@@ -85,17 +88,15 @@ export function renderMarkdownReport(input: ReportInput): string {
     "### Hardware",
     toMarkdownTable(["Component", "Detail"], [
       ["CPU", cpuDetail(hardware)],
-      ["GPU", gpuDetail(hardware.primaryGpu)],
+      ["GPU", gpuDetail(hardware)],
       ["RAM", memoryDetail(hardware)],
-      ["Disk", `${hardware.disk.type} · ${hardware.disk.freeGb} GB free`],
-      ["Usable for inference", formatMb(input.availableVramMb)],
+      ["Disk", `${hardware.disk.type} · ${hardware.disk.freeGb} GiB free`],
+      ["Usable for inference", formatUsableMb(input.availableVramMb, budgetExact(hardware))],
     ]),
   ];
 
-  if (hardware.primaryGpu?.acceleratorType === "metal") {
-    const reservedGb = (UNIFIED_MEMORY_HEADROOM_MB / 1024).toFixed(0);
-    blocks.push(`_Unified memory — estimate reserves ~${reservedGb} GB for OS, editor, and other apps._`);
-  }
+  const memoryNote = unifiedMemoryNote(hardware);
+  if (memoryNote) blocks.push(`_Usable for inference: ${memoryNote}._`);
 
   blocks.push(
     "### Runtimes",
@@ -124,17 +125,18 @@ export function renderMarkdownReport(input: ReportInput): string {
   if (input.recommendations.length > 0) {
     blocks.push(
       toMarkdownTable(
-        ["#", "Model", "Quant", "Fit", "VRAM", "Speed", "Installed"],
+        ["#", "Model", "Quant", "Fit", "Need", "Speed", "Installed"],
         input.recommendations.map(({ rank, score }) => [
           rank,
           score.model.name,
           score.quantization.name,
           score.fitLevel,
-          formatMb(score.quantization.vramMb),
+          formatNeed(memoryBreakdown(score.model, score.quantization, hardware)),
           score.speedEstimate,
           score.model.ollamaTag !== null && input.installedTags.has(score.model.ollamaTag) ? "yes" : null,
         ]),
       ),
+      `_${NEED_NOTE}. ${SPEED_NOTE}._`,
     );
   } else {
     blocks.push(

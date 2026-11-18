@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRocmCsv } from "../../src/hardware/gpu.js";
+import { parseRocmCsv, isDiscreteIntel } from "../../src/hardware/gpu.js";
 
 describe("parseRocmCsv", () => {
   it("parses real rocm-smi --csv output (header row + one row per card)", () => {
@@ -31,5 +31,31 @@ describe("parseRocmCsv", () => {
   it("returns an empty list for empty or header-only output", () => {
     expect(parseRocmCsv("")).toEqual([]);
     expect(parseRocmCsv("device,VRAM Total (B)")).toEqual([]);
+  });
+});
+
+describe("isDiscreteIntel", () => {
+  it.each([
+    "Intel(R) Arc(TM) A770 Graphics",
+    "Intel(R) Arc(TM) A380 Graphics",
+    "Intel(R) Arc(TM) A730M Graphics",
+    "Intel(R) Arc(TM) B580 Graphics",
+    "Intel(R) Arc(TM) Pro B60 Graphics",
+    "Intel(R) Arc(TM) Pro A60 Graphics",
+    "Intel(R) Arc(TM) Pro B70 Graphics",
+    "Intel(R) Arc(TM) A380E Graphics",
+  ])("treats %s as discrete", (model) => {
+    expect(isDiscreteIntel(model)).toBe(true);
+  });
+
+  it.each([
+    "Intel(R) Arc(TM) B390 Graphics",
+    "Intel(R) Arc(TM) Pro B390 GPU",
+    "Intel(R) Arc(TM) Pro B370 GPU",
+    "Intel(R) Arc(TM) 140V Graphics",
+    "Intel(R) Arc(TM) Graphics",
+    "Intel(R) Iris(R) Xe Graphics",
+  ])("treats %s as integrated", (model) => {
+    expect(isDiscreteIntel(model)).toBe(false);
   });
 });

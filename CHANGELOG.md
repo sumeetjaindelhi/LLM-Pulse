@@ -8,6 +8,168 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Releases before `1.0.0` predate this changelog and were not consistently
 > git-tagged, so their dates are omitted rather than reconstructed.
 
+## [1.2.0] - 2026-11-18
+
+Every memory figure is now exact (read from the model file or measured on your
+machine), derived from the pinned llama.cpp and Ollama sources, or marked as an
+estimate (`est.`, `≈`). The README section "How llm-pulse calculates fit" gives
+each formula and its source.
+
+### Added
+- **Live model catalog:** recommendations, `models` and the single-model
+  commands also use models from ollama.com/library, so new releases appear
+  without a llm-pulse update. The CLI refreshes the catalog when the cached
+  copy is more than a day old (5-second limit); the MCP server checks hourly.
+  The exported `getAllModels` / `searchModels` / `filterByCategory` read the
+  cached catalog but never fetch it. With the catalog in use, every model,
+  curated ones included, is scored from size, release recency, pull velocity
+  and a coding bonus; offline, curated models keep their hand-set scores.
+  `LLMPULSE_OFFLINE=1` or `"offline": true` in `.llmpulserc` turns all of this
+  off, including `models --library`.
+- **Exact model facts:** `check`, `compare`, `quant-advice`, `optimize`,
+  `context-fit` and the MCP `check` and `context-fit-check` tools read an
+  installed GGUF model's architecture, training context and file size from
+  your Ollama (`/api/show`, `/api/tags`). For a model that is neither bundled
+  nor installed they read the same facts from Ollama's registry (manifest,
+  config and the first 256 KiB of the GGUF file, cached in
+  `~/.llmpulse/cache`), picking the build Ollama would pull on this platform.
+  Vision projectors and draft models count toward the file size.
+- **Memory breakdown in JSON:** `memory` (`contextTokens`, `weightsMb`,
+  `weightsExact`, `kvCacheMb`, `kvExact`, `computeMb`, `totalMb`, `budgetMb`,
+  `budgetExact`)
+  in `check` (every quantization), `quant-advice`, `compare`, `optimize` (at
+  `num_ctx`), `context-fit` (at the needed tokens), `scan`, and the MCP `scan`,
+  `recommend`, `check` and `context-fit-check` tools. The `check`, `scan`,
+  `context-fit`, `quant-advice` and `compare` CSVs append the same columns.
+- More JSON fields:
+  - `qualityMeasured` in `quant-advice` and `optimize`: false when
+    `qualityRetention` is only a placeholder;
+  - `pullQuantization` beside `pullCommand` in `check`, `quant-advice` and MCP
+    `check`: the file that command installs;
+  - `contextWindowEstimated` in `check`, `compare`, `optimize` and MCP
+    `recommend`;
+  - `gpuCount` in `check`, `quant-advice`, `optimize`, `scan` and the MCP
+    `scan` and `recommend` tools;
+  - `weightsExact` in `models` (JSON and CSV);
+  - `nativeWindowEstimated` in `context-fit`;
+  - `ollamaDefaultContext` and `kvQ8MaxContext` in `optimize`;
+  - `catalog` in `scan`.
+- `doctor`: a `Context` row, when a loaded model runs with less context than
+  agents and coding tools need (64,000 tokens) while the machine could hold
+  more, and a `Model catalog` row.
+- MCP: `models` takes `limit` (default 100, max 500) and returns `total`;
+  `check` now uses its `host` input; the `monitor` snapshot gains `modelVramMb` (Ollama
+  `/api/ps` `size_vram`), `gpuCount` and `gpuUnifiedMemory`.
+- Hardware: NVIDIA DGX Spark / GB10 unified memory; the AMD Strix Halo APU
+  (gfx1151, its GTT pool); amdgpu `vram_total` instead of the lspci BAR size;
+  Intel Arc discrete cards told apart from Arc-branded iGPUs;
+  `OLLAMA_IGPU_ENABLE` honoured as Ollama does.
+- Types: `ArchFacts`, `MemoryBreakdown`, `CatalogHealth`, `LoadedModel.arch`,
+  `ModelEntry.arch` / `source` / `activeParametersBillion` /
+  `contextWindowEstimated`, `QuantizationVariant.exact`,
+  `GpuInfo.unifiedMemory` / `gfxTarget`, `ContextFitResult.memory` /
+  `nativeWindowEstimated`.
+
+### Changed
+- **Memory model:** a fit is weights + KV cache + compute buffer at the
+  context Ollama will use on this machine (4,096, 32,768 or 262,144 tokens by
+  total VRAM, capped at the model's training context), checked against usable
+  memory:
+  - discrete GPUs: VRAM − 1 GiB (llama.cpp's fit margin) − 457 MiB (an
+    estimate of what the driver and runtime context hold on an idle GPU),
+    summed over the GPUs of one runtime (CUDA, ROCm or Vulkan), since Ollama
+    loads a model onto one runtime's GPUs;
+  - Apple Silicon: the Metal working set − 1 GiB;
+  - GB10: available RAM − 1 GiB − 457 MiB; Strix Halo: min(GTT pool,
+    available RAM) − 1 GiB − 457 MiB;
+  - CPU only: available RAM.
+  Integrated GPUs count only where Ollama uses them (NVIDIA, AMD gfx1151,
+  Apple, or with `OLLAMA_IGPU_ENABLE`); others count as CPU only. The usable
+  figure is marked `est.` where it includes the 457 MiB estimate. Fit levels
+  are redefined on this basis (README table); the exported `classifyFit` keeps
+  the 1.1.0 weights-ratio thresholds.
+- KV cache sizes are exact wherever the architecture is known, including
+  sliding-window, latent-attention and recurrent layers. They are marked
+  `est.` for unknown architectures, models shipped with a draft model (when
+  their facts come from the registry), parallel hybrids such as Falcon-H1,
+  and MLX builds.
+- The compute buffer (`≈`) adds the attention mask (context × batch × 2 bytes,
+  one per GPU, four per GPU when several GPUs hold the whole model) to a
+  vocabulary-based estimate of the graph's working memory.
+- Quality per quantization is `exp(−KLD)` from llama.cpp's published KL
+  divergence, shown with one decimal; formats without a measurement show
+  `n/a`.
+- Recommendations score the file `ollama pull <tag>` installs, rank by fit
+  before score, show one model per family, and leave out embedding and
+  natively ternary models. Partial fits are offered only with a discrete GPU.
+- `check`, `compare` of named models and MCP `check` headline the same
+  quantization (`compare --category` shows the pulled file, as `scan` does).
+  MCP `check` returns the `check --format json` payload (an unknown
+  quantization is an error there) and gains `gpuOffload`.
+- `check` and `quant-advice` list quantizations smallest file first, in
+  tables, JSON (`allQuantizations`, `quantizations`) and CSV (`check` listed
+  them by score before).
+- Table columns now say what they show: `scan`, `compare` and `report`
+  `VRAM` → `Need` (weights + KV cache + compute buffer at the default
+  context, not the weights alone); `check` `VRAM` / `Available` →
+  `Need at N tokens` / `Usable`; `models` `VRAM` and `quant-advice` `Size` →
+  `Weights`. These renames, and the MCP `monitor` `modelSize` unit (GB →
+  GiB), change output the Stability section otherwise changes only in major
+  releases. They correct labels: the old `VRAM` columns showed weights under
+  the wrong name, and the old units were already binary.
+- `optimize` tunes the file `FROM <tag>` loads, unless that file would not fit
+  whole (then the sweet spot). For a quantization the tag does not install,
+  the Modelfile reads `FROM <Q8_0 tag>` instead of silently loading another
+  file. `num_batch` shows the batch Ollama picks automatically for `num_ctx`
+  and is pinned (256) only on tight fits.
+- Pull lines name the file `ollama pull <tag>` installs and its size, and
+  point to the model's tag list when the recommended quantization is another
+  file. `gpuOffload.ollamaCommand` is `null` when `ollama run <tag>` would
+  load another quantization than the one sized. The suggested layer count is
+  shown as an estimate (`≈`).
+- Sizes are labelled GiB/MiB. The values were always binary (MiB ÷ 1024) but
+  were labelled GB/MB: tables, `doctor` messages, the monitor TUI and the MCP
+  `monitor` `modelSize` string.
+- "Usable memory" replaces "VRAM" wherever the figure is the budget. Changed
+  `optimize` notes: `automatic — Ollama uses up to this`, `smaller — eases
+  tight-fit memory spike`, `KV cache won't fit at 2048 — expect CPU offload`,
+  `capped at est. window — pull to confirm`.
+- Several GPUs are named together (`2× NVIDIA GeForce RTX 3090`); a GPU
+  Ollama does not use is labelled so instead of counting as usable VRAM.
+- The `scan` tip ("you can run up to NB") is sized at a 4K context and marked
+  as an estimate. The `doctor` GPU row no longer claims a model-size range.
+- Monitor VRAM Map: measured figures only (the loaded model's GPU memory as
+  Ollama reports it, other GPU use, free memory). "Can still fit" lists
+  curated models whose need at 4,096 tokens fits in free memory after the
+  runtime's reserves. The `VramBreakdown` type replaces `modelWeightsMb`,
+  `kvCacheMb` and `overheadMb`, which held invented values, with
+  `modelVramMb`, `otherMb` and `split`.
+- `--quant` is matched after exact facts are applied; a live-catalog model's
+  only quantization matches both `default` (or `ternary`) and its real type.
+
+### Removed
+- The flat 6 GB headroom subtracted from Apple Silicon GPU memory: the
+  runtime's own margin replaces it.
+- Invented figures in the monitor: model weights guessed from the model name,
+  a 60% KV-cache share of used VRAM, and a fixed "can still fit" list.
+
+### Fixed
+- **Bundled model data, now read from Ollama's registry:**
+  - Default files: the `gemma2`, `mixtral`, `phi3`, `codellama`,
+    `deepseek-coder-v2`, `yi`, `starcoder2`, `tinyllama` and
+    `mistral-small:22b` tags install Q4_0; `llama3.2:1b` and `smollm2:1.7b`
+    install Q8_0; `nomic-embed-text` installs F16. Their sizes are the real
+    files, vision projectors included.
+  - Training contexts of 29 models, e.g. Qwen 2.5 is 32,768 tokens (not
+    131,072), Qwen 3 8B–32B 40,960, Command R7B 8,192.
+  - 12 models (Qwen 3 8B/14B/32B, DeepSeek-R1 7B/14B/32B, Gemma 3 12B/27B,
+    Phi-4, Mistral Small 24B, QwQ, Llama 4 Scout) listed a Q5_K_M that Ollama
+    does not publish; they now list the published Q8_0.
+- Intel GPUs on Linux reported 16 or 256 MiB of VRAM (an lspci BAR size), so
+  every model read as unable to run; they now count as CPU only.
+- Model card badges from ollama.com are stripped of terminal control
+  characters.
+
 ## [1.1.0] - 2026-09-13
 
 ### Added

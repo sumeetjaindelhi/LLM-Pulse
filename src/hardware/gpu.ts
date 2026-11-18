@@ -3,6 +3,7 @@ import { execa } from "execa";
 import { z } from "zod";
 import { retry } from "./retry.js";
 import { detectIntelGpu } from "./intel-gpu.js";
+import { readAmdSysfsMemory } from "./amd-sysfs.js";
 import { resolveNvidiaSmi } from "./nvidia-smi-path.js";
 import type { GpuInfo } from "../core/types.js";
 
@@ -21,8 +22,11 @@ const SMI_RETRY = {
 } as const;
 
 interface NvidiaGpuStats {
+  // 0 when nvidia-smi reports no total (unified memory only).
   vramTotalMb: number;
-  vramUsedMb: number;
+  // null when memory.used is "[N/A]" (unified-memory GPUs).
+  vramUsedMb: number | null;
+  unifiedMemory: boolean;
   utilizationPercent: number;
   temperatureCelsius: number;
   driverVersion: string;
@@ -32,6 +36,8 @@ interface NvidiaSmiResult {
   // One entry per nvidia-smi row, in the order nvidia-smi reports them; null
   // for a row that could not be parsed, so row positions stay aligned.
   gpus: (NvidiaGpuStats | null)[];
+  // Normalised PCI bus id of each row (see normalizeBusId), same order as `gpus`.
+  busIds: (string | undefined)[];
   cudaVersion: string;
 }
 
@@ -43,6 +49,8 @@ interface RocmSmiResult {
 }
 
 export interface RocmGpuStats {
+  // Normalised PCI bus id; undefined when rocm-smi did not report one.
+  busId?: string;
   vramTotalMb: number;
   vramUsedMb: number;
   utilizationPercent: number;
@@ -59,6 +67,7 @@ export interface RocmGpuStats {
 
 const RocmJsonGpu = z
   .object({
+    "PCI Bus": z.string().optional(),
     "VRAM Total Memory (B)": z.string().optional(),
     "VRAM Total (B)": z.string().optional(),
     "VRAM Total Used Memory (B)": z.string().optional(),
@@ -91,8 +100,16 @@ function pickNumber(values: (string | undefined)[]): number {
   return 0;
 }
 
+/** "00000000:0A:00.0" and "0a:00.0" both become "0:0a:00.0": domain as a number (missing = 0), lower case. undefined when not a PCI bus id. */
+export function normalizeBusId(raw: string | undefined): string | undefined {
+  const m = raw?.trim().toLowerCase().match(/^(?:([0-9a-f]{1,8}):)?([0-9a-f]{2}:[0-9a-f]{2}\.[0-7])$/);
+  return m ? `${parseInt(m[1] ?? "0", 16)}:${m[2]}` : undefined;
+}
+
 function toRocmGpuStats(gpu: z.infer<typeof RocmJsonGpu>): RocmGpuStats {
+  const busId = normalizeBusId(gpu["PCI Bus"]);
   return {
+    ...(busId && { busId }),
     vramTotalMb: pickBytesToMb([gpu["VRAM Total Memory (B)"], gpu["VRAM Total (B)"]]),
     vramUsedMb: pickBytesToMb([
       gpu["VRAM Total Used Memory (B)"],
@@ -140,7 +157,7 @@ export function parseRocmCsv(stdout: string): RocmGpuStats[] {
     );
 }
 
-const ROCM_STAT_ARGS = ["--showmeminfo", "vram", "--showtemp", "--showuse"];
+const ROCM_STAT_ARGS = ["--showmeminfo", "vram", "--showtemp", "--showuse", "--showbus"];
 
 /** Per-card rocm-smi stats. Tries --json first (per-GPU, version-independent
  *  field set) and falls back to --csv for rocm-smi builds without --json.
@@ -157,13 +174,22 @@ export async function readRocmGpuStats(): Promise<RocmGpuStats[]> {
   return parseRocmCsv(stdout);
 }
 
-async function parseNvidiaSmi(): Promise<NvidiaSmiResult | null> {
+// nvidia-smi prints "[N/A]" / "Not Supported" instead of a number for fields
+// the GPU cannot report; parseInt turns those into NaN.
+export function parseSmiInt(field: string): number | null {
+  const value = parseInt(field, 10);
+  return isNaN(value) ? null : value;
+}
+
+// GB10 / Jetson (arm64) have no dedicated VRAM, so nvidia-smi cannot report
+// memory.used. On any other host such a row is just a broken reading.
+async function parseNvidiaSmi(arch: string): Promise<NvidiaSmiResult | null> {
   const binPath = await resolveNvidiaSmi();
   if (!binPath) return null;
 
   return retry(async () => {
     const { stdout } = await execa(binPath, [
-      "--query-gpu=memory.total,memory.used,utilization.gpu,temperature.gpu,driver_version",
+      "--query-gpu=memory.total,memory.used,utilization.gpu,temperature.gpu,driver_version,pci.bus_id",
       "--format=csv,noheader,nounits",
     ], { timeout: 5000 });
 
@@ -177,18 +203,21 @@ async function parseNvidiaSmi(): Promise<NvidiaSmiResult | null> {
       // ignore
     }
 
-    const gpus = stdout.trim().split("\n").map((line) => {
-      const [vramTotal, vramUsed, utilization, temp, driver] = line
-        .split(",")
-        .map((s) => s.trim());
-
-      const vramTotalMb = parseInt(vramTotal, 10);
-      const vramUsedMb = parseInt(vramUsed, 10);
-      if (isNaN(vramTotalMb) || isNaN(vramUsedMb)) return null;
+    const rows = stdout.trim().split("\n").map((line) => line.split(",").map((s) => s.trim()));
+    // Unified-memory NVIDIA systems are single-GPU, so a lone memory-less row
+    // is GB10; a memory-less row beside a healthy one is just a sick card.
+    const hasDedicatedRow = rows.some((row) => parseSmiInt(row[1]) !== null);
+    const gpus = rows.map(([vramTotal, vramUsed, utilization, temp, driver]) => {
+      const vramTotalMb = parseSmiInt(vramTotal);
+      const vramUsedMb = parseSmiInt(vramUsed);
+      const unifiedMemory =
+        arch === "arm64" && vramUsedMb === null && driver !== undefined && !hasDedicatedRow;
+      if (!unifiedMemory && (vramTotalMb === null || vramUsedMb === null)) return null;
 
       return {
-        vramTotalMb,
+        vramTotalMb: vramTotalMb ?? 0,
         vramUsedMb,
+        unifiedMemory,
         utilizationPercent: parseInt(utilization, 10) || 0,
         temperatureCelsius: parseInt(temp, 10) || 0,
         driverVersion: driver,
@@ -198,7 +227,7 @@ async function parseNvidiaSmi(): Promise<NvidiaSmiResult | null> {
       throw new Error("nvidia-smi returned unparseable output");
     }
 
-    return { gpus, cudaVersion };
+    return { gpus, busIds: rows.map((row) => normalizeBusId(row[5])), cudaVersion };
   }, SMI_RETRY);
 }
 
@@ -224,7 +253,14 @@ async function parseRocmSmi(): Promise<RocmSmiResult | null> {
   }, SMI_RETRY);
 }
 
-export async function detectGpus(): Promise<GpuInfo[]> {
+// Intel ARK naming: discrete Arc cards are A3xx/A5xx/A7xx (A730M mobile), B5xx and up (B570, B580),
+// embedded A3xxE/A5xxE, and Arc Pro A/B with two digits (A60, B60). Arc B3xx and Arc Pro B3xx (B390, B370:
+// Panther Lake iGPUs), "Arc 1xxV/1xxT" and plain "Graphics" are iGPUs that share system RAM and report no VRAM.
+export function isDiscreteIntel(model: string): boolean {
+  return /\bArc(?:\(TM\))?\s+(?:Pro\s+[AB]\d{2}M?|A[3-7]\d{2}[ME]?|B[5-9]\d{2})\b/i.test(model);
+}
+
+export async function detectGpus(arch: string = process.arch): Promise<GpuInfo[]> {
   const graphics = await si.graphics();
 
   // Detect vendor first to decide which SMI tool(s) to call.
@@ -236,19 +272,37 @@ export async function detectGpus(): Promise<GpuInfo[]> {
   const hasAmd = vendors.includes("AMD");
   const hasIntel = vendors.includes("Intel");
 
-  // Run probes in parallel based on detected vendors. Intel probe is cheap
-  // (sysfs reads only) so we always run it when there's any Intel controller.
-  const [nvidiaSmi, rocmSmi, intelGpu] = await Promise.all([
-    hasNvidia ? parseNvidiaSmi() : Promise.resolve(null),
+  // Run probes in parallel based on detected vendors. Intel probe only checks
+  // for the Level Zero loader, so we always run it when there's any Intel controller.
+  const [nvidiaSmi, rocmSmi, intelGpu, amdSysfs] = await Promise.all([
+    hasNvidia ? parseNvidiaSmi(arch) : Promise.resolve(null),
     hasAmd ? parseRocmSmi() : Promise.resolve(null),
     hasIntel ? detectIntelGpu() : Promise.resolve(null),
+    hasAmd ? readAmdSysfsMemory() : Promise.resolve([]),
   ]);
 
+  const amdControllerCount = vendors.filter((v) => v === "AMD").length;
   const gpus: GpuInfo[] = [];
   let nvidiaIndex = 0;
   let amdIndex = 0;
 
-  for (const controller of graphics.controllers) {
+  // An smi row belongs to the controller on the same PCI bus: a card the driver does not use (vfio-bound) must not
+  // shift the pairing. Position is the fallback only when no bus ids are available at all.
+  const controllerBuses = graphics.controllers.map((c) => normalizeBusId(c.busAddress));
+  const nvidiaByBus = nvidiaSmi?.busIds.some(Boolean) === true && controllerBuses.some(Boolean);
+  const rocmBusIds = rocmSmi?.gpus.map((g) => g.busId) ?? [];
+  const rocmByBus = rocmBusIds.some(Boolean) && controllerBuses.some(Boolean);
+  // A row serves one controller: a second controller on the same bus (a clinfo duplicate of an lspci entry) is dropped.
+  const usedNvidiaRows = new Set<number>();
+  const usedRocmRows = new Set<number>();
+  const rowFor = (byBus: boolean, busIds: (string | undefined)[], bus: string | undefined, position: number, used: Set<number>): number => {
+    const row = byBus ? busIds.findIndex((id) => id !== undefined && id === bus) : position < busIds.length ? position : -1;
+    if (row < 0 || used.has(row)) return -1;
+    used.add(row);
+    return row;
+  };
+
+  for (const [controllerIndex, controller] of graphics.controllers.entries()) {
     // Skip virtual/display-only adapters
     if (!controller.model || controller.model.includes("Microsoft")) continue;
 
@@ -258,13 +312,20 @@ export async function detectGpus(): Promise<GpuInfo[]> {
     const isApple = vendor === "Apple";
     const isIntel = vendor === "Intel";
 
-    // Multi-NVIDIA: same controller-to-row matching as the AMD path below. A
-    // row nvidia-smi could not report on sends that controller down the
-    // generic path instead of borrowing another card's stats.
-    const stats = isNvidia && nvidiaSmi
-      ? (nvidiaIndex < nvidiaSmi.gpus.length ? nvidiaSmi.gpus[nvidiaIndex] : nvidiaSmi.gpus[0])
-      : null;
+    // Multi-NVIDIA: the row on the controller's PCI bus (by position without bus ids). A controller with no row
+    // (vfio-bound, unsupported by the driver) is not usable and is dropped, never given another card's row. A row
+    // nvidia-smi could not report on sends that controller down the generic path.
+    const nvidiaRow = isNvidia && nvidiaSmi ? rowFor(nvidiaByBus, nvidiaSmi.busIds, controllerBuses[controllerIndex], nvidiaIndex, usedNvidiaRows) : 0;
+    if (isNvidia && nvidiaSmi && nvidiaRow < 0) continue;
+    const stats = isNvidia && nvidiaSmi ? (nvidiaSmi.gpus[nvidiaRow] ?? null) : null;
     if (isNvidia) nvidiaIndex++;
+
+    // Position among AMD controllers, shared by the rocm-smi rows and sysfs cards.
+    // Skipped when the counts differ: a card without a DRM node (e.g. bound to
+    // vfio-pci) would shift every later pairing (ollama discover/amd.go:163-167).
+    const amdPosition = isAmd ? amdIndex++ : 0;
+    const sysfs = isAmd && amdSysfs.length === amdControllerCount ? amdSysfs[amdPosition] ?? null : null;
+    const apu = sysfs?.apu ?? null;
 
     if (isNvidia && nvidiaSmi && stats) {
       gpus.push({
@@ -277,18 +338,17 @@ export async function detectGpus(): Promise<GpuInfo[]> {
         utilizationPercent: stats.utilizationPercent,
         temperatureCelsius: stats.temperatureCelsius,
         vramUsedMb: stats.vramUsedMb,
+        ...(stats.unifiedMemory && { unifiedMemory: true }),
       });
     } else if (isAmd && rocmSmi) {
-      // Multi-AMD: match each controller to the next per-GPU row from
-      // rocm-smi --json (stable order via card0/card1/…). If rocm-smi
-      // reported fewer rows than systeminformation saw controllers (rare —
-      // usually means one GPU is powered off), fall back to the first row.
-      const stats = rocmSmi.gpus[amdIndex] ?? rocmSmi.gpus[0];
-      amdIndex++;
+      // Multi-AMD: match each controller to the rocm-smi row on its PCI bus (by position without bus ids; stable
+      // order via card0/card1/…). A controller with no row (one GPU powered off or unsupported) is dropped.
+      const stats = rocmSmi.gpus[rowFor(rocmByBus, rocmBusIds, controllerBuses[controllerIndex], amdPosition, usedRocmRows)];
+      if (!stats) continue;
       gpus.push({
         vendor,
         model: controller.model,
-        vramMb: stats.vramTotalMb,
+        vramMb: apu?.gttTotalMb ?? stats.vramTotalMb,
         // ROCm tooling doesn't expose the kernel driver version via rocm-smi
         // itself — prefer the rocmVersion over systeminformation's field
         // for diagnostics; doctor.ts uses acceleratorVersion anyway.
@@ -297,17 +357,19 @@ export async function detectGpus(): Promise<GpuInfo[]> {
         acceleratorType: "rocm",
         utilizationPercent: stats.utilizationPercent,
         temperatureCelsius: stats.temperatureCelsius,
-        vramUsedMb: stats.vramUsedMb,
+        vramUsedMb: apu?.gttUsedMb ?? stats.vramUsedMb,
+        ...(apu && { unifiedMemory: true }),
+        ...(sysfs?.gfxTarget && { gfxTarget: sysfs.gfxTarget }),
       });
-    } else if (isIntel && intelGpu && intelGpu.vramMb > 0) {
-      // Intel Arc / discrete Intel GPU: sysfs gave us a real VRAM number.
-      // Mark as oneapi so the scorer knows it's a GPU, not CPU-only.
+    } else if (isIntel && intelGpu?.hasOneApiRuntime && isDiscreteIntel(controller.model)) {
+      // Discrete Intel Arc with a Level Zero loader present (probed on Linux only). There controller.vram is an
+      // lspci BAR parse (16 with ReBAR, else 256; i915/xe expose no VRAM size), never a VRAM figure.
       gpus.push({
         vendor,
         model: controller.model,
-        vramMb: intelGpu.vramMb,
+        vramMb: 0,
         driverVersion: controller.driverVersion || "",
-        acceleratorVersion: intelGpu.hasOneApiRuntime ? "oneapi" : null,
+        acceleratorVersion: "oneapi",
         acceleratorType: "oneapi",
         utilizationPercent: null,
         temperatureCelsius: controller.temperatureGpu ?? null,
@@ -317,20 +379,26 @@ export async function detectGpus(): Promise<GpuInfo[]> {
       // Generic path: Apple Metal, Intel iGPU, anything we don't have a
       // specialized probe for. Intel iGPUs share system RAM; the aperture size
       // systeminformation reports for them is not usable VRAM, so vramMb is 0
-      // and the scorer falls back to CPU/RAM. Discrete Arc cards (A/B-series
-      // model numbers, e.g. A770, B580) have no sysfs figure off Linux but do
-      // report real dedicated VRAM, so keep it. Arc-branded iGPUs ("Arc
-      // Graphics", "Arc 140V") carry no such number.
+      // and the scorer falls back to CPU/RAM. Off Linux, discrete Arc cards
+      // (A/B-series model numbers, e.g. A770, B580) keep the driver's dedicated
+      // VRAM figure from systeminformation; on Linux that figure is an lspci
+      // BAR parse, so it is 0 there too.
       gpus.push({
         vendor,
         model: controller.model,
-        vramMb: isIntel && !/\bArc\b.*\b[AB]\d{3}M?\b/i.test(controller.model) ? 0 : controller.vram || 0,
+        // Prefer the kernel's amdgpu vram_total over systeminformation's
+        // lspci BAR-size figure (lib/graphics.js reads `size=` regions).
+        vramMb: apu?.gttTotalMb
+          ?? sysfs?.vramTotalMb
+          ?? (isIntel && (process.platform === "linux" || !isDiscreteIntel(controller.model)) ? 0 : controller.vram || 0),
         driverVersion: controller.driverVersion || "",
         acceleratorVersion: null,
         acceleratorType: isApple ? "metal" : null,
         utilizationPercent: null,
         temperatureCelsius: controller.temperatureGpu ?? null,
         vramUsedMb: null,
+        ...((isApple || apu) && { unifiedMemory: true }),
+        ...(sysfs?.gfxTarget && { gfxTarget: sysfs.gfxTarget }),
       });
     }
   }

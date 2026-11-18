@@ -8,6 +8,9 @@ import { severityIcon } from "../ui/badges.js";
 import { sectionHeader } from "../ui/boxes.js";
 import { toCsv } from "../ui/csv.js";
 import { resolveOllamaHost } from "../../core/config.js";
+import { LocalhostUrl } from "../../core/api-schemas.js";
+import { fetchLoadedModelsWithKv } from "../../runtimes/ollama.js";
+import { getCatalogHealth } from "../../models/database.js";
 import type { FixAction, FixPlanEntry } from "../../core/types.js";
 
 export async function doctorCommand(options: { format?: string; host?: string; fix?: boolean; dryRun?: boolean }): Promise<void> {
@@ -19,7 +22,13 @@ export async function doctorCommand(options: { format?: string; host?: string; f
     detectAllRuntimes(ollamaHost),
   ]);
 
-  const report = runDiagnostics(hardware, runtimes);
+  const ollamaRunning = runtimes.some((r) => r.name === "Ollama" && r.status === "running");
+  // Capacity comes from this machine's hardware, so only a local server's loaded models are comparable.
+  const loadedModels = ollamaRunning && LocalhostUrl.safeParse(ollamaHost).success
+    ? await fetchLoadedModelsWithKv(ollamaHost)
+    : [];
+
+  const report = runDiagnostics(hardware, runtimes, loadedModels, getCatalogHealth());
   spinner.succeed("Diagnostics complete");
 
   if (options.format === "json" || options.format === "csv") {

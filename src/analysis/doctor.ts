@@ -1,4 +1,9 @@
-import { MIN_REQUIREMENTS, DOCTOR_WEIGHTS } from "../core/constants.js";
+import { MIN_REQUIREMENTS, DOCTOR_WEIGHTS, AGENT_MIN_CONTEXT } from "../core/constants.js";
+import { resolveModel } from "../models/database.js";
+import { computeOptimization } from "./optimizer.js";
+import { CONTEXT_TIERS, snapToContextTier } from "./memory-model.js";
+import { maxContextTokensForVram } from "./context-capacity.js";
+import { ignoredGpu, ignoredGpuLabel } from "./scorer.js";
 import type {
   HardwareProfile,
   RuntimeInfo,
@@ -6,6 +11,8 @@ import type {
   HealthReport,
   FixAction,
   FixPlanEntry,
+  LoadedModel,
+  CatalogHealth,
 } from "../core/types.js";
 
 // Defense-in-depth: every FixAction literal today is a hardcoded constant in
@@ -39,9 +46,72 @@ export function planFixes(fixes: FixAction[]): FixPlanEntry[] {
   });
 }
 
+// Warns about each loaded model whose allocated context sits below both Ollama's
+// 64K agent guidance and what this machine could hold. Advisory only: it never
+// feeds the score and offers no auto-fix, since it needs a server restart.
+function contextChecks(hardware: HardwareProfile, loadedModels: LoadedModel[]): DiagnosticCheck[] {
+  const checks: DiagnosticCheck[] = [];
+  for (const loaded of loadedModels) {
+    const current = loaded.contextLength;
+    const entry = resolveModel(loaded.name);
+    if (current === null || !entry) continue;
+
+    const model = loaded.arch ? { ...entry, arch: loaded.arch } : entry;
+    const level = loaded.quantizationLevel?.toLowerCase();
+    const quant = model.quantizations.find((q) => q.name.toLowerCase() === level) ?? computeOptimization(model, hardware)?.quant;
+    if (!quant) continue;
+    const target = snapToContextTier(maxContextTokensForVram(model, quant, hardware));
+    if (target < CONTEXT_TIERS[0] || current >= AGENT_MIN_CONTEXT || current >= target) continue;
+
+    checks.push({
+      label: "Context",
+      severity: "warning",
+      message: `${loaded.name} is loaded with ${current.toLocaleString()} tokens of context; this machine can hold ${target.toLocaleString()}`,
+      suggestion: `Restart Ollama with: OLLAMA_CONTEXT_LENGTH=${target} ollama serve (agents and coding tools need at least ${AGENT_MIN_CONTEXT.toLocaleString()} tokens)`,
+    });
+  }
+  return checks;
+}
+
+const MS_PER_HOUR = 60 * 60 * 1000;
+const MS_PER_DAY = 24 * MS_PER_HOUR;
+// A failing refresh only matters once the catalog on disk has gone this stale.
+const CATALOG_STALE_AFTER_MS = 7 * MS_PER_DAY;
+
+function formatAge(ms: number): string {
+  const days = Math.floor(ms / MS_PER_DAY);
+  if (days >= 1) return `${days} day${days === 1 ? "" : "s"}`;
+  const hours = Math.floor(ms / MS_PER_HOUR);
+  if (hours < 1) return "less than an hour";
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+// Informational only: the bundled model list always works, so this never feeds the score.
+function catalogCheck(catalog: CatalogHealth): DiagnosticCheck {
+  const now = Date.now();
+  const staleOrMissing = catalog.lastSuccessAt === null || now - catalog.lastSuccessAt > CATALOG_STALE_AFTER_MS;
+  if (catalog.lastError !== null && staleOrMissing) {
+    return {
+      label: "Model catalog",
+      severity: "warning",
+      message: `Model catalog refresh is failing: ${catalog.lastError}`,
+      suggestion: "Run `llm-pulse models --refresh` to retry; the built-in list keeps working meanwhile. To stop fetching, set \"offline\": true or LLMPULSE_OFFLINE=1.",
+    };
+  }
+  const message = catalog.source === "live" && catalog.fetchedAt !== null
+    ? `${catalog.liveModels} live models from ollama.com, updated ${formatAge(now - catalog.fetchedAt)} ago`
+    : catalog.offline
+      ? "offline: built-in list (LLMPULSE_OFFLINE / offline config)"
+      : "online, but no catalog cached yet: built-in list";
+  const suggestion = !catalog.offline && catalog.source !== "live" ? "Run `llm-pulse models --refresh` to fetch it" : undefined;
+  return { label: "Model catalog", severity: "info", message, ...(suggestion && { suggestion }) };
+}
+
 export function runDiagnostics(
   hardware: HardwareProfile,
   runtimes: RuntimeInfo[],
+  loadedModels: LoadedModel[] = [],
+  catalog?: CatalogHealth,
 ): HealthReport {
   const checks: DiagnosticCheck[] = [];
   let score = 0;
@@ -100,17 +170,24 @@ export function runDiagnostics(
 
   // ── GPU Checks ──
   const gpu = hardware.primaryGpu;
-  if (gpu && gpu.vramMb >= MIN_REQUIREMENTS.vramMb) {
+  const ignored = ignoredGpu(hardware);
+  if (ignored) {
+    checks.push({
+      label: "GPU",
+      severity: "warning",
+      message: `${ignoredGpuLabel(ignored)} — models will run on CPU`,
+      suggestion: "Set OLLAMA_IGPU_ENABLE=1 to let Ollama use it; it shares system memory.",
+    });
+  } else if (gpu && gpu.vramMb >= MIN_REQUIREMENTS.vramMb) {
     const vramGb = (gpu.vramMb / 1024).toFixed(0);
-    const sizeHint = gpu.vramMb >= 16384 ? "7B-32B" : gpu.vramMb >= 8192 ? "7B-14B" : "3B-7B";
-    checks.push({ label: "GPU VRAM", severity: "pass", message: `${vramGb} GB VRAM — can run ${sizeHint} models` });
+    checks.push({ label: "GPU VRAM", severity: "pass", message: `${vramGb} GiB VRAM — see \`llm-pulse scan\` for the models that fit` });
     score += DOCTOR_WEIGHTS.gpuVram;
   } else if (gpu && gpu.vramMb > 0) {
     checks.push({
       label: "GPU VRAM",
       severity: "warning",
-      message: `Only ${(gpu.vramMb / 1024).toFixed(1)} GB VRAM — limited to small models`,
-      suggestion: "4+ GB VRAM recommended. Consider CPU-only inference or smaller models.",
+      message: `Only ${(gpu.vramMb / 1024).toFixed(1)} GiB VRAM — limited to small models`,
+      suggestion: "4+ GiB VRAM recommended. Consider CPU-only inference or smaller models.",
     });
     score += DOCTOR_WEIGHTS.gpuVram * 0.3;
   } else {
@@ -118,7 +195,7 @@ export function runDiagnostics(
       label: "GPU",
       severity: "warning",
       message: "No dedicated GPU detected — models will run on CPU",
-      suggestion: "A GPU with 6+ GB VRAM dramatically speeds up inference.",
+      suggestion: "A GPU with 6+ GiB VRAM dramatically speeds up inference.",
     });
   }
 
@@ -136,7 +213,7 @@ export function runDiagnostics(
     checks.push({
       label: "Unified Memory",
       severity: "info",
-      message: `Apple Silicon unified memory — ~${usableGb} GB wired to GPU (${pct}% of ${totalGb} GB total)`,
+      message: `Apple Silicon unified memory — ~${usableGb} GiB wired to GPU (${pct}% of ${totalGb} GiB total)`,
     });
   }
 
@@ -178,14 +255,14 @@ export function runDiagnostics(
   // ── Memory Checks ──
   if (hardware.memory.totalMb >= MIN_REQUIREMENTS.ramMb) {
     const ramGb = (hardware.memory.totalMb / 1024).toFixed(0);
-    checks.push({ label: "RAM", severity: "pass", message: `${ramGb} GB RAM — good headroom for CPU offloading` });
+    checks.push({ label: "RAM", severity: "pass", message: `${ramGb} GiB RAM — good headroom for CPU offloading` });
     score += DOCTOR_WEIGHTS.ramTotal;
   } else {
     checks.push({
       label: "RAM",
       severity: "fail",
-      message: `Only ${(hardware.memory.totalMb / 1024).toFixed(1)} GB RAM — insufficient`,
-      suggestion: "8+ GB RAM recommended. 16+ GB ideal for larger models.",
+      message: `Only ${(hardware.memory.totalMb / 1024).toFixed(1)} GiB RAM — insufficient`,
+      suggestion: "8+ GiB RAM recommended. 16+ GiB ideal for larger models.",
     });
   }
 
@@ -229,14 +306,14 @@ export function runDiagnostics(
   }
 
   if (hardware.disk.freeGb >= MIN_REQUIREMENTS.diskFreeGb) {
-    checks.push({ label: "Disk Space", severity: "pass", message: `${hardware.disk.freeGb} GB free — plenty for models` });
+    checks.push({ label: "Disk Space", severity: "pass", message: `${hardware.disk.freeGb} GiB free — plenty for models` });
     score += DOCTOR_WEIGHTS.diskSpace;
   } else {
     checks.push({
       label: "Disk Space",
       severity: "warning",
-      message: `Only ${hardware.disk.freeGb} GB free — models need 4-40 GB each`,
-      suggestion: "Free up disk space. A 7B Q4 model needs ~4 GB.",
+      message: `Only ${hardware.disk.freeGb} GiB free — models need 4-40 GiB each`,
+      suggestion: "Free up disk space. A 7B Q4 model needs ~4 GiB.",
     });
   }
 
@@ -259,10 +336,12 @@ export function runDiagnostics(
             label: "Pull a starter model",
             command: "ollama pull llama3.2:3b",
             argv: ["ollama", "pull", "llama3.2:3b"],
-            description: "Downloads Llama 3.2 3B (~2 GB) — a great starter model",
+            description: "Downloads Llama 3.2 3B (~2 GiB) — a great starter model",
           },
         });
       }
+
+      if (ollamaRuntime) checks.push(...contextChecks(hardware, loadedModels));
     } else {
       const installed = runtimes.find((r) => r.status !== "not_found");
       checks.push({
@@ -309,6 +388,8 @@ export function runDiagnostics(
       },
     });
   }
+
+  if (catalog) checks.push(catalogCheck(catalog));
 
   // ── Compute final score ──
   const normalizedScore = Math.round((score / maxScore) * 100);

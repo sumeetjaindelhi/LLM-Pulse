@@ -43,7 +43,7 @@ export const Overview = React.memo(function Overview({ snapshot, session, cpuHis
 
   const vramStr =
     snapshot.gpuVramUsedMb !== null && snapshot.gpuVramTotalMb !== null
-      ? `${(snapshot.gpuVramUsedMb / 1024).toFixed(1)}/${(snapshot.gpuVramTotalMb / 1024).toFixed(1)} GB`
+      ? `${(snapshot.gpuVramUsedMb / 1024).toFixed(1)}/${(snapshot.gpuVramTotalMb / 1024).toFixed(1)} GiB`
       : "";
 
   return (
@@ -80,7 +80,7 @@ export const Overview = React.memo(function Overview({ snapshot, session, cpuHis
         <Text dimColor>{"  RAM  "}</Text>
         <Text color={barColor(snapshot.ramPercent)}>{renderBar(snapshot.ramPercent)}</Text>
         <Text dimColor>
-          {` ${String(snapshot.ramPercent).padStart(3)}%  ${(snapshot.ramUsedMb / 1024).toFixed(1)}/${(snapshot.ramTotalMb / 1024).toFixed(1)} GB`}
+          {` ${String(snapshot.ramPercent).padStart(3)}%  ${(snapshot.ramUsedMb / 1024).toFixed(1)}/${(snapshot.ramTotalMb / 1024).toFixed(1)} GiB`}
         </Text>
       </Text>
 

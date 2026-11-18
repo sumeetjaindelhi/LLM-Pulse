@@ -1,5 +1,5 @@
 import { scoreModel, pickSweetSpot } from "./scorer.js";
-import { maxContextTokensForVram } from "./context-capacity.js";
+import { maxContextTokensForVram, memoryBreakdown, type KvCacheType } from "./context-capacity.js";
 import type {
   ContextFitInput,
   ContextFitResult,
@@ -7,12 +7,18 @@ import type {
   ModelEntry,
   QuantizationVariant,
 } from "../core/types.js";
+import { isUnifiedMemory } from "../core/unified-memory.js";
 
 const DEFAULT_RESPONSE_RESERVE = 512;
 
 // Above this fraction of the effective ceiling a workload still fits but leaves
 // little slack — flagged "tight" so callers can warn before it OOMs in practice.
 const CONTEXT_TIGHT_FRACTION = 0.9;
+
+// An estimated native window is a guess, so it must not cap what the hardware affords.
+function ceilingFor(model: ModelEntry, affordedTokens: number): number {
+  return model.contextWindowEstimated ? affordedTokens : Math.min(model.contextWindow, affordedTokens);
+}
 
 // Sweet-spot quant for auto mode; falls back to the smallest (most compressed)
 // quant when nothing fits, so the result still reports a meaningful ceiling
@@ -25,7 +31,7 @@ function resolveQuant(
   if (forced) return { quant: forced, forced: true };
   const scores = model.quantizations
     .map((q) => scoreModel(model, q, hardware))
-    .sort((a, b) => a.quantization.bitsPerWeight - b.quantization.bitsPerWeight);
+    .sort((a, b) => a.quantization.vramMb - b.quantization.vramMb);
   const idx = pickSweetSpot(scores);
   const quant = idx >= 0 ? scores[idx].quantization : scores[0].quantization;
   return { quant, forced: false };
@@ -40,14 +46,32 @@ function findSmallerQuantThatFits(
   needed: number,
 ): { name: string; effective: number } | null {
   const smaller = model.quantizations
-    .filter((q) => q.bitsPerWeight < current.bitsPerWeight)
-    .sort((a, b) => b.bitsPerWeight - a.bitsPerWeight); // least compression first
+    .filter((q) => q.vramMb < current.vramMb)
+    .sort((a, b) => b.vramMb - a.vramMb); // least compression first
   for (const q of smaller) {
     const afforded = maxContextTokensForVram(model, q, hardware);
-    const effective = Math.min(model.contextWindow, afforded);
+    const effective = ceilingFor(model, afforded);
     if (effective >= needed) {
       return { name: q.name, effective };
     }
+  }
+  return null;
+}
+
+// Smallest KV-cache quantization (least quality loss first) whose ceiling lets
+// `needed` fit. A "tight" input must also clear the tight band, or the remedy
+// would trade one tight verdict for another. null when none does.
+function findKvCacheTypeThatFits(
+  model: ModelEntry,
+  hardware: HardwareProfile,
+  quant: QuantizationVariant,
+  needed: number,
+  verdict: "no" | "tight",
+): { type: KvCacheType; effective: number } | null {
+  const usableFraction = verdict === "tight" ? CONTEXT_TIGHT_FRACTION : 1;
+  for (const type of ["q8_0", "q4_0"] as const) {
+    const effective = ceilingFor(model, maxContextTokensForVram(model, quant, hardware, type));
+    if (needed <= usableFraction * effective) return { type, effective };
   }
   return null;
 }
@@ -61,6 +85,7 @@ function buildRemedy(
   effectiveMax: number,
   responseTokens: number,
   needed: number,
+  verdict: "no" | "tight",
 ): string {
   if (limitedBy === "model") {
     return `Exceeds the model's ${model.contextWindow.toLocaleString()}-token native window — use a longer-context model or trim the prompt.`;
@@ -78,7 +103,11 @@ function buildRemedy(
   if (trimTo <= 0) {
     return `Response reserve (${responseTokens.toLocaleString()} tokens) leaves no room in the ${effectiveMax.toLocaleString()}-token ceiling — lower the response reserve.`;
   }
-  const offload = hardware.primaryGpu && hardware.primaryGpu.acceleratorType !== "metal"
+  const kvFit = findKvCacheTypeThatFits(model, hardware, quant, needed, verdict);
+  if (kvFit) {
+    return `Run Ollama with OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=${kvFit.type} — affords ${kvFit.effective.toLocaleString()} tokens on this hardware.`;
+  }
+  const offload = hardware.primaryGpu && !isUnifiedMemory(hardware.primaryGpu)
     ? ", or offload fewer layers to the GPU"
     : "";
   const unpin = quantForced ? " (or drop --quant to try a smaller quant)" : "";
@@ -96,9 +125,9 @@ export function checkContextFit(
 
   const nativeWindow = model.contextWindow;
   const affordedByVramTokens = maxContextTokensForVram(model, quant, hardware);
-  const effectiveMaxTokens = Math.min(nativeWindow, affordedByVramTokens);
+  const effectiveMaxTokens = ceilingFor(model, affordedByVramTokens);
   const limitedBy: "model" | "hardware" =
-    affordedByVramTokens < nativeWindow ? "hardware" : "model";
+    model.contextWindowEstimated || affordedByVramTokens < nativeWindow ? "hardware" : "model";
 
   let verdict: "yes" | "tight" | "no";
   if (neededTokens > effectiveMaxTokens) verdict = "no";
@@ -107,7 +136,7 @@ export function checkContextFit(
 
   const remedy = verdict === "yes"
     ? null
-    : buildRemedy(model, hardware, quant, forced, limitedBy, effectiveMaxTokens, responseTokens, neededTokens);
+    : buildRemedy(model, hardware, quant, forced, limitedBy, effectiveMaxTokens, responseTokens, neededTokens, verdict);
 
   return {
     model: {
@@ -128,5 +157,7 @@ export function checkContextFit(
     verdict,
     headroomTokens: effectiveMaxTokens - neededTokens,
     remedy,
+    memory: memoryBreakdown(model, quant, hardware, neededTokens),
+    ...(model.contextWindowEstimated && { nativeWindowEstimated: true as const }),
   };
 }

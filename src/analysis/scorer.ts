@@ -1,5 +1,9 @@
-import { FIT_THRESHOLDS, UNIFIED_MEMORY_HEADROOM_MB } from "../core/constants.js";
+import { isUnifiedMemory } from "../core/unified-memory.js";
+import { FIT_THRESHOLDS } from "../core/constants.js";
+import { assessFit, budgetMb, layersThatFit, ollamaDefaultContext, speedClass, type FitAssessment } from "./memory-model.js";
+import { computeMb, kvCacheMb, memoryNeedMb, type KvCacheType } from "./context-capacity.js";
 import type {
+  GpuInfo,
   HardwareProfile,
   ModelEntry,
   QuantizationVariant,
@@ -23,28 +27,150 @@ export function deriveVerdict(fitLevel: FitLevel): Verdict {
   }
 }
 
-export function getAvailableVram(hardware: HardwareProfile): number {
-  // `primaryGpu.vramMb` is already the final usable cap — on Apple Silicon,
-  // the wired-memory limit has been applied in `detectHardware`; on discrete
-  // GPUs it's the actual VRAM reported by nvidia-smi / rocm-smi.
-  //
-  // Guard on vramMb > 0: a GPU with zero reported VRAM (e.g. an Intel iGPU
-  // systeminformation couldn't probe) should fall back to the CPU/RAM path
-  // rather than forcing every model into cannot_run.
-  //
-  // On unified memory (Apple Silicon), the wired-limit sysctl is a kernel
-  // ceiling — it doesn't reflect that the OS, editor, browser, and every
-  // other app are drawing from the same pool. We subtract a flat headroom
-  // so fit scoring reports what the machine can run while staying usable,
-  // not the theoretical max for an idle box. A 2 GB floor prevents the
-  // headroom from flipping small-RAM systems into cannot_run for every model.
-  if (hardware.primaryGpu && hardware.primaryGpu.vramMb > 0) {
-    if (hardware.primaryGpu.acceleratorType === "metal") {
-      return Math.max(hardware.primaryGpu.vramMb - UNIFIED_MEMORY_HEADROOM_MB, 2048);
-    }
-    return hardware.primaryGpu.vramMb;
+const FALSE_ENV_VALUES = new Set(["0", "f", "F", "FALSE", "false", "False"]);
+
+/** OLLAMA_IGPU_ENABLE as O envconfig reads it: undefined when unset, false for a false boolean, else true (an unparsable value counts as true). */
+function integratedGpuSetting(): boolean | undefined {
+  const value = (process.env.OLLAMA_IGPU_ENABLE ?? "").replace(/^["' ]+|["' ]+$/g, "");
+  return value === "" ? undefined : !FALSE_ENV_VALUES.has(value);
+}
+
+/**
+ * Ollama's integrated-GPU admission (O discover/runner.go integratedGPUAdmission, 31-34, 382-435): an explicit
+ * OLLAMA_IGPU_ENABLE decides alone, except Metal, which is never filtered; unset, it keeps CUDA (GB10, Jetson) and AMD gfx1151 (Strix Halo).
+ */
+function isAllowedIntegrated(gpu: GpuInfo): boolean {
+  if (gpu.acceleratorType === "metal") return true;
+  return integratedGpuSetting() ?? (gpu.acceleratorType === "cuda" || gpu.gfxTarget === "gfx1151");
+}
+
+/**
+ * The GPUs Ollama schedules on: none without a primary GPU that reports memory; otherwise every discrete GPU
+ * with VRAM plus the integrated GPUs Ollama admits, else just the primary if admitted. A dropped integrated GPU
+ * leaves the machine CPU-only (O discover/runner.go:126, 382-435).
+ */
+function inferenceGpus(hardware: HardwareProfile): GpuInfo[] {
+  const primary = hardware.primaryGpu;
+  if (!primary || primary.vramMb <= 0) return [];
+  const discrete = hardware.gpus.filter((gpu) => gpu.vramMb > 0 && !isUnifiedMemory(gpu));
+  const integrated = discrete.length > 0 ? hardware.gpus.filter((gpu) => gpu.vramMb > 0 && isUnifiedMemory(gpu)) : [primary];
+  return [...discrete, ...integrated.filter((gpu) => !isUnifiedMemory(gpu) || isAllowedIntegrated(gpu))];
+}
+
+/** True when no GPU contributes memory: none detected, only ones that report 0 VRAM, or only integrated ones Ollama drops. */
+export function isCpuOnly(hardware: HardwareProfile): boolean {
+  return inferenceGpus(hardware).length === 0;
+}
+
+/** The detected GPU Ollama will not schedule on (a dropped integrated GPU), else null. */
+export function ignoredGpu(hardware: HardwareProfile): GpuInfo | null {
+  const gpu = hardware.primaryGpu;
+  return gpu && gpu.vramMb > 0 && isCpuOnly(hardware) ? gpu : null;
+}
+
+/** Why Ollama skips `gpu`, worded the same in every command. */
+export function ignoredGpuLabel(gpu: GpuInfo): string {
+  return `${gpu.model} not used by Ollama (integrated; OLLAMA_IGPU_ENABLE=1 enables it)`;
+}
+
+function isAmd(gpu: GpuInfo): boolean {
+  const vendor = gpu.vendor.toLowerCase();
+  return vendor.includes("amd") || vendor.includes("advanced micro");
+}
+
+/** Runtime library Ollama loads for the GPU: NVIDIA CUDA, AMD ROCm, Apple Metal, anything else (Intel) Vulkan. */
+function runtimeLibrary(gpu: GpuInfo): string {
+  if (gpu.acceleratorType === "metal") return "Metal";
+  if (gpu.vendor.toLowerCase().includes("nvidia")) return "CUDA";
+  return isAmd(gpu) ? "ROCm" : "Vulkan";
+}
+
+function gpuBudgetMb(gpu: GpuInfo, availableMb: number): number {
+  if (!isUnifiedMemory(gpu)) return budgetMb({ kind: "discrete-gpu", vramMb: gpu.vramMb });
+  if (gpu.acceleratorType === "metal") return budgetMb({ kind: "apple-metal", vramMb: gpu.vramMb });
+  if (isAmd(gpu)) return budgetMb({ kind: "amd-apu", gttMb: gpu.vramMb, availableMb });
+  return budgetMb({ kind: "unified", availableMb });
+}
+
+/**
+ * The GPUs one model loads on. Ollama never splits a model across runtime libraries: it groups GPUs by library
+ * and places on one group (O ml/device.go ByLibrary, O server/sched.go:1008-1128). This is the group with the
+ * largest summed budget; empty when the machine is CPU-only.
+ */
+export function budgetGpus(hardware: HardwareProfile): GpuInfo[] {
+  const availableMb = hardware.memory.availableMb;
+  const groups = new Map<string, GpuInfo[]>();
+  for (const gpu of inferenceGpus(hardware)) {
+    const library = runtimeLibrary(gpu);
+    groups.set(library, [...(groups.get(library) ?? []), gpu]);
   }
-  return hardware.memory.availableMb;
+  const groupBudget = (group: GpuInfo[]): number => group.reduce((sum, gpu) => sum + gpuBudgetMb(gpu, availableMb), 0);
+  const [first = [], ...rest] = groups.values();
+  return rest.reduce((best, group) => (groupBudget(group) > groupBudget(best) ? group : best), first);
+}
+
+/** GPUs the model loads on; 1 when CPU-only (the compute buffer then lives in RAM). */
+export function budgetGpuCount(hardware: HardwareProfile): number {
+  return Math.max(1, budgetGpus(hardware).length);
+}
+
+/**
+ * Memory (MiB) the model may use: the memory-model budget for this machine, after the runtime's fixed
+ * reserves (see `budgetMb`). Discrete GPUs: the sum of each card's VRAM budget in the chosen runtime group
+ * (L common/fit.cpp:748-752 applies the margin per device). Apple: the Metal working set. GB10-style unified
+ * memory: available RAM. AMD APU: GTT (`vramMb`) capped by available RAM. No usable GPU: available RAM.
+ */
+export function getAvailableVram(hardware: HardwareProfile): number {
+  const availableMb = hardware.memory.availableMb;
+  const gpus = budgetGpus(hardware);
+  if (gpus.length === 0) return budgetMb({ kind: "cpu-only", availableMb });
+  return gpus.reduce((sum, gpu) => sum + gpuBudgetMb(gpu, availableMb), 0);
+}
+
+/**
+ * False when getAvailableVram includes llm-pulse's estimated GPU context reserve (discrete GPUs, GB10, AMD APUs);
+ * true on Apple Metal (working set minus a fixed 1 GiB) and CPU-only (available RAM, by definition).
+ */
+export function budgetExact(hardware: HardwareProfile): boolean {
+  const [gpu] = budgetGpus(hardware);
+  return !gpu || gpu.acceleratorType === "metal";
+}
+
+/** One line saying what the budget is on unified-memory hardware; null for discrete GPUs and CPU-only machines. */
+export function unifiedMemoryNote(hardware: HardwareProfile): string | null {
+  const [gpu] = budgetGpus(hardware);
+  if (!gpu || !isUnifiedMemory(gpu)) return null;
+  if (gpu.acceleratorType === "metal") return "Metal working set — macOS keeps the rest for the system";
+  if (isAmd(gpu)) return "GPU pool = GTT";
+  return "unified memory — budget is available RAM";
+}
+
+/** The model's training context when known; an estimated window is a guess and is not one. */
+export function trainContextOf(model: ModelEntry): number | undefined {
+  return model.arch?.contextLength ?? (model.contextWindowEstimated ? undefined : model.contextWindow);
+}
+
+/** Context Ollama allocates by default on this machine: total VRAM of the GPUs it uses, clamped to the training context. */
+export function defaultContextFor(model: ModelEntry, hardware: HardwareProfile): number {
+  const totalVramMb = inferenceGpus(hardware).reduce((sum, gpu) => sum + gpu.vramMb, 0);
+  return ollamaDefaultContext(totalVramMb, trainContextOf(model));
+}
+
+/** Fit of one quant on this machine at Ollama's default context; `maxContext` is capped at the training context. */
+export function assessModelFit(
+  model: ModelEntry,
+  quant: QuantizationVariant,
+  hardware: HardwareProfile,
+  kvType: KvCacheType = "f16",
+): FitAssessment {
+  const gpuCount = budgetGpuCount(hardware);
+  return assessFit({
+    budgetMb: getAvailableVram(hardware),
+    cpuOnly: isCpuOnly(hardware),
+    defaultContext: defaultContextFor(model, hardware),
+    need: (ctx) => memoryNeedMb(model, quant, ctx, kvType, undefined, gpuCount),
+    trainContext: trainContextOf(model),
+  });
 }
 
 export function isFitting(level: FitLevel): boolean {
@@ -56,8 +182,7 @@ export function isComfortable(level: FitLevel): boolean {
 }
 
 // "Either can't run or will run painfully slow" — the threshold downstream
-// rendering uses for a failure tone, and `estimateSpeed` uses to short-circuit
-// to "slow".
+// rendering uses for a failure tone; memory-model's `speedClass` short-circuits the same levels to "slow".
 export function isCriticalFit(level: FitLevel): boolean {
   return level === "cannot_run" || level === "barely";
 }
@@ -70,10 +195,6 @@ export function classifyFit(availableVramMb: number, requiredVramMb: number): Fi
   if (ratio >= FIT_THRESHOLDS.tight) return "tight";
   if (ratio >= FIT_THRESHOLDS.barely) return "barely";
   return "cannot_run";
-}
-
-export function getFitRatio(availableVramMb: number, requiredVramMb: number): number {
-  return requiredVramMb > 0 ? availableVramMb / requiredVramMb : 0;
 }
 
 const TIER_SCORES: Record<string, number> = {
@@ -91,31 +212,13 @@ const FIT_FACTORS: Record<FitLevel, number> = {
   cannot_run: 0,
 };
 
-function estimateSpeed(
-  fitLevel: FitLevel,
-  paramsBillion: number,
-  hasGpu: boolean,
-): "fast" | "moderate" | "slow" {
-  if (isCriticalFit(fitLevel)) return "slow";
-  if (!hasGpu) return paramsBillion <= 3 ? "moderate" : "slow";
-  if (paramsBillion <= 7 && isComfortable(fitLevel)) return "fast";
-  if (paramsBillion <= 14) return "moderate";
-  return "slow";
-}
-
 export function scoreModel(
   model: ModelEntry,
   quant: QuantizationVariant,
   hardware: HardwareProfile,
   category: ModelCategory | "all" = "all",
 ): ModelScore {
-  // Single source of truth for "what VRAM can this model actually use" —
-  // applies the unified-memory headroom on Apple Silicon so fit ratings
-  // match day-to-day usability, not the idle sysctl ceiling.
-  const availableVramMb = getAvailableVram(hardware);
-
-  const fitRatio = getFitRatio(availableVramMb, quant.vramMb);
-  const fitLevel = classifyFit(availableVramMb, quant.vramMb);
+  const { level: fitLevel, fitRatio } = assessModelFit(model, quant, hardware);
 
   // Composite score: quality * quantization retention * tier * fit
   const tierScore = TIER_SCORES[model.qualityTier] ?? 0.5;
@@ -152,11 +255,18 @@ export function scoreModel(
     fitLevel,
     fitRatio,
     compositeScore,
-    speedEstimate: estimateSpeed(fitLevel, model.parametersBillion, !!hardware.primaryGpu),
+    speedEstimate: speedClass({
+      level: fitLevel,
+      cpuOnly: isCpuOnly(hardware),
+      weightsMb: quant.vramMb,
+      activeParams: model.activeParametersBillion,
+      totalParams: model.parametersBillion,
+    }),
   };
 }
 
-// Rough transformer-block count for common model sizes. Ollama's `num_gpu`
+// ESTIMATE, used only when the model's architecture facts (ModelEntry.arch) are unknown: the bucket is a
+// rough transformer-block count for common model sizes, off by up to ~20% for a given architecture. Ollama's `num_gpu`
 // maps to llama.cpp's `--n-gpu-layers`: how many blocks live on GPU, with
 // the rest on CPU. Layer counts come from published configs for mainstream
 // Llama / Qwen / Gemma / DeepSeek families. Exact counts vary ±20% across
@@ -173,10 +283,6 @@ function estimateTotalLayers(paramsBillion: number): number {
   if (paramsBillion <= 80) return 80;
   return 126;
 }
-
-// Leave ~10% of VRAM for KV cache, attention workspace, and runtime overhead.
-// Without this a "perfect" weight-only fit OOMs the first time context grows.
-const OFFLOAD_KV_HEADROOM = 0.9;
 
 // Tolerance for treating two qualityRetention values as "tied" — anything
 // closer than 0.5% is noise from data-source rounding, not a real gap.
@@ -205,26 +311,45 @@ export function pickSweetSpot(scores: ModelScore[]): number {
   }).i;
 }
 
+/** The quant to headline for one model (check, compare, MCP): the sweet spot, else the best composite when nothing fits. */
+export function headlineScore(scores: ModelScore[]): ModelScore {
+  const idx = pickSweetSpot(scores);
+  return idx >= 0 ? scores[idx] : scores.reduce((best, s) => (s.compositeScore > best.compositeScore ? s : best));
+}
+
+/** True when `quant` is the file `ollama pull <tag>` installs, or that file is unknown: pull, run and FROM with the tag
+ *  load it. */
+export function isTagFile(model: ModelEntry, quant: QuantizationVariant): boolean {
+  const pulled = model.quantizations.find((q) => q.exact);
+  return !pulled || pulled.name === quant.name;
+}
+
 export function suggestGpuOffload(
   model: ModelEntry,
   quant: QuantizationVariant,
   hardware: HardwareProfile,
+  context: number = defaultContextFor(model, hardware),
 ): GpuOffloadSuggestion | null {
-  const gpu = hardware.primaryGpu;
-  if (!gpu || gpu.vramMb <= 0) return null;
+  const [gpu] = budgetGpus(hardware);
+  if (!gpu) return null;
   // Unified memory: `num_gpu` is effectively "all" by default and the CPU/GPU
   // split isn't meaningful — weights live in the same RAM pool either way.
-  if (gpu.acceleratorType === "metal") return null;
+  if (isUnifiedMemory(gpu)) return null;
 
-  const availableVramMb = gpu.vramMb;
-  const totalLayers = estimateTotalLayers(model.parametersBillion);
+  const totalLayers = model.arch?.layers ?? estimateTotalLayers(model.parametersBillion);
   const weightsPerLayer = quant.vramMb / totalLayers;
-  const usableVramForWeights = availableVramMb * OFFLOAD_KV_HEADROOM;
-  const layersThatFit = Math.floor(usableVramForWeights / weightsPerLayer);
+  const layersOnGpu = layersThatFit({
+    budgetMb: getAvailableVram(hardware),
+    kvMb: kvCacheMb(model, context),
+    computeMb: computeMb(model, context, undefined, budgetGpuCount(hardware), false),
+    weightsMb: quant.vramMb,
+    layers: totalLayers,
+  });
 
-  const tag = model.ollamaTag;
+  // `ollama run <tag>` loads the file the tag installs, so the commands hold only for that quant.
+  const tag = isTagFile(model, quant) ? model.ollamaTag : null;
 
-  if (layersThatFit >= totalLayers) {
+  if (layersOnGpu >= totalLayers) {
     return {
       gpuLayers: "all",
       totalLayers,
@@ -234,7 +359,7 @@ export function suggestGpuOffload(
     };
   }
 
-  if (layersThatFit < 1) {
+  if (layersOnGpu < 1) {
     return {
       gpuLayers: 0,
       totalLayers,
@@ -245,12 +370,12 @@ export function suggestGpuOffload(
   }
 
   return {
-    gpuLayers: layersThatFit,
+    gpuLayers: layersOnGpu,
     totalLayers,
-    estimatedVramUsedMb: Math.round(layersThatFit * weightsPerLayer),
+    estimatedVramUsedMb: Math.round(layersOnGpu * weightsPerLayer),
     reason: "partial_offload",
     // Ollama sets `num_gpu` via an interactive `/set parameter` line after
     // `ollama run`, or via a Modelfile `PARAMETER` — there's no CLI flag.
-    ollamaCommand: tag ? `/set parameter num_gpu ${layersThatFit}` : null,
+    ollamaCommand: tag ? `/set parameter num_gpu ${layersOnGpu}` : null,
   };
 }

@@ -18,6 +18,7 @@ const ConfigSchema = z.object({
   defaultFormat: z.enum(OUTPUT_FORMATS).optional(),
   defaultCategory: z.enum(CATEGORY_FILTERS).optional(),
   defaultTop: z.number().int().min(1).max(50).optional(),
+  offline: z.boolean().optional(),
 }).passthrough();
 
 export type LlmPulseConfig = z.infer<typeof ConfigSchema>;
@@ -65,6 +66,11 @@ export function loadConfig(): LlmPulseConfig {
 export function getConfig(): LlmPulseConfig {
   if (cachedConfig === null) return loadConfig();
   return cachedConfig;
+}
+
+/** True when the user opted out of network model-catalog updates (`LLMPULSE_OFFLINE=1` or `"offline": true` in `.llmpulserc`). */
+export function isOffline(): boolean {
+  return process.env.LLMPULSE_OFFLINE === "1" || getConfig().offline === true;
 }
 
 /** Strip trailing slashes so we never produce double-slashes when concatenating paths. */

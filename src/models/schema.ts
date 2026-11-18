@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { ArchFactsSchema } from "../core/api-schemas.js";
 
 export const QuantizationVariantSchema = z.object({
   name: z.string(),
   bitsPerWeight: z.number(),
   vramMb: z.number(),
   qualityRetention: z.number().min(0).max(1),
+  exact: z.literal(true).optional(),
 });
 
 export const ModelEntrySchema = z.object({
@@ -14,6 +16,7 @@ export const ModelEntrySchema = z.object({
   parametersBillion: z.number(),
   contextWindow: z.number(),
   kvMbPer1kTokens: z.number().positive().optional(),
+  arch: ArchFactsSchema.optional(),
   categories: z.array(
     z.enum(["general", "coding", "reasoning", "creative", "multilingual"]),
   ),

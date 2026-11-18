@@ -3,6 +3,7 @@ import { detectGpus } from "./gpu.js";
 import { detectMemory } from "./memory.js";
 import { detectDisk } from "./disk.js";
 import { readAppleVramLimit } from "./apple-memory.js";
+import { isUnifiedMemory } from "../core/unified-memory.js";
 import type { HardwareProfile } from "../core/types.js";
 
 let cachedProfile: HardwareProfile | null = null;
@@ -27,25 +28,33 @@ export async function detectHardware(): Promise<HardwareProfile> {
     detectDisk(),
   ]);
 
-  // Apple Silicon uses unified memory: systeminformation reports vram: 0 for
-  // Metal GPUs because there is no discrete VRAM pool. The usable budget is a
+  // Unified-memory GPUs have no discrete VRAM pool: systeminformation reports
+  // vram: 0 for Metal GPUs, and nvidia-smi gives no total on GB10. Non-Apple
+  // ones simply use system memory. For Apple the usable budget is a
   // user-raised `iogpu.wired_limit_mb`, else Metal's recommended working set.
   // We resolve it once here so downstream callers can use
   // `primaryGpu.vramMb` as the final usable cap without further multipliers.
   // The factor fallback covers an Apple GPU seen off macOS (e.g. Asahi Linux),
   // where readAppleVramLimit returns vramMb null.
   for (const g of gpus) {
-    if (g.acceleratorType === "metal" && g.vramMb === 0 && memory.totalMb > 0) {
+    if (!isUnifiedMemory(g) || g.vramMb !== 0 || memory.totalMb <= 0) continue;
+    if (g.acceleratorType === "metal") {
       const limit = await readAppleVramLimit(memory.totalMb * 1024 * 1024);
       g.vramMb =
         limit.vramMb ?? Math.round(memory.totalMb * limit.factor);
+    } else {
+      g.vramMb = memory.totalMb;
     }
   }
 
-  // Primary GPU = the one with the most VRAM
+  // Primary GPU = the one with the most VRAM, preferring dedicated cards: an
+  // iGPU's system-RAM pool can be larger, but runtimes default to the discrete
+  // card.
+  const dedicated = gpus.filter((g) => g.vramMb > 0 && !isUnifiedMemory(g));
+  const candidates = dedicated.length > 0 ? dedicated : gpus;
   const primaryGpu =
-    gpus.length > 0
-      ? gpus.reduce((best, g) => (g.vramMb > best.vramMb ? g : best))
+    candidates.length > 0
+      ? candidates.reduce((best, g) => (g.vramMb > best.vramMb ? g : best))
       : null;
 
   cachedProfile = { cpu, gpus, memory, disk, primaryGpu };

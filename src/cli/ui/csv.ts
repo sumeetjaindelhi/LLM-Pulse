@@ -2,6 +2,8 @@
  * RFC 4180 CSV formatting utilities.
  */
 
+import type { MemoryBreakdown } from "../../core/types.js";
+
 // Leading characters that spreadsheet apps treat as formula starts (CWE-1236).
 // Strings from outside the program (scraped library descriptions, Ollama API
 // model names) end up in CSV exports — without this guard, a hostile value
@@ -22,6 +24,15 @@ export function escapeCsvValue(value: unknown): string {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
+}
+
+/** MemoryBreakdown columns; appended after a CSV's existing columns so those keep their positions. */
+export const MEMORY_CSV_HEADERS: readonly (keyof MemoryBreakdown)[] = [
+  "contextTokens", "weightsMb", "weightsExact", "kvCacheMb", "kvExact", "computeMb", "totalMb", "budgetMb", "budgetExact",
+];
+
+export function memoryCsvCells(memory: MemoryBreakdown): (number | boolean)[] {
+  return MEMORY_CSV_HEADERS.map((key) => memory[key]);
 }
 
 /** Build a full CSV string from headers and rows. */

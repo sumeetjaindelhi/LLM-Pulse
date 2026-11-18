@@ -1,22 +1,29 @@
 import ora from "ora";
 import { detectHardware } from "../../hardware/index.js";
-import { computeOptimization } from "../../analysis/optimizer.js";
-import { getAvailableVram } from "../../analysis/scorer.js";
-import { resolveModel } from "../../models/database.js";
+import { computeOptimization, kvQ8MaxContext } from "../../analysis/optimizer.js";
+import { budgetExact, budgetGpus, defaultContextFor, getAvailableVram, isTagFile } from "../../analysis/scorer.js";
+import { memoryBreakdown } from "../../analysis/context-capacity.js";
+import { autoBatch } from "../../analysis/memory-model.js";
+import { findQuant, resolveModel } from "../../models/database.js";
+import { withExactFacts } from "../../runtimes/ollama.js";
+import { resolveOllamaHost } from "../../core/config.js";
 import { titleBox, sectionHeader, keyValue, subLine } from "../ui/boxes.js";
 import { theme } from "../ui/colors.js";
 import { fitBadge } from "../ui/badges.js";
-import { formatMb } from "../ui/progress.js";
+import { formatBreakdown, gpuRows, formatMb, formatNeedAt, formatUsable, formatUsableMb, pullLines } from "../ui/progress.js";
 import { renderModelNotFound } from "../ui/errors.js";
 import { toCsv } from "../ui/csv.js";
 import type {
   ModelEntry,
   HardwareProfile,
+  MemoryBreakdown,
   OptimizationProfile,
   OptimizedParameter,
   OptimizeOptions,
   QuantizationVariant,
 } from "../../core/types.js";
+import { isUnifiedMemory } from "../../core/unified-memory.js";
+import { quantRetention } from "../../models/quant-facts.js";
 
 // Bundles everything the three output paths (table/JSON/CSV) share, so each
 // render function takes one parameter. New fields land here rather than threading
@@ -27,6 +34,9 @@ interface OptimizeContext {
   profile: OptimizationProfile;
   availableVramMb: number;
   quantWarning: string | null;
+  defaultContext: number;
+  kvQ8Max: number | null;
+  memory: MemoryBreakdown; // need at num_ctx
 }
 
 // "llama3.1:8b" -> "llama3.1-8b-tuned": a valid Ollama model name for `create`.
@@ -36,7 +46,7 @@ function tunedName(tag: string): string {
 
 // The PARAMETER lines worth pasting: num_ctx and num_thread always; num_gpu only
 // for a partial offload (a specific layer count — "all" and 0 are Ollama's own
-// defaults); num_batch only when it deviates from the 512 default. Keeping the
+// defaults); num_batch only when pinned below the automatic batch. Keeping the
 // list to what actually changes behaviour avoids a Modelfile full of no-ops.
 function modelfileParams(profile: OptimizationProfile): Array<[string, number]> {
   const params: Array<[string, number]> = [["num_ctx", profile.numCtx.value as number]];
@@ -44,17 +54,24 @@ function modelfileParams(profile: OptimizationProfile): Array<[string, number]> 
     params.push(["num_gpu", profile.numGpu.value]);
   }
   params.push(["num_thread", profile.numThread.value as number]);
-  if (profile.numBatch.value !== 512) {
+  if (profile.numBatch.value !== autoBatch(profile.numCtx.value as number)) {
     params.push(["num_batch", profile.numBatch.value as number]);
   }
   return params;
+}
+
+// The model name FROM and `ollama run` take: the tag when it installs the tuned
+// quant, else a placeholder, so a pasted line fails instead of loading another
+// file (pullLines says where that quant's tag is listed).
+function runName(model: ModelEntry, quant: QuantizationVariant): string {
+  return isTagFile(model, quant) ? model.ollamaTag! : `<${quant.name} tag>`;
 }
 
 // The FROM + PARAMETER block, or null when the model isn't on Ollama (no tag to
 // build FROM against).
 function buildModelfile(profile: OptimizationProfile, model: ModelEntry): string | null {
   if (!model.ollamaTag) return null;
-  const lines = [`FROM ${model.ollamaTag}`];
+  const lines = [`FROM ${runName(model, profile.quant)}`];
   for (const [name, value] of modelfileParams(profile)) {
     lines.push(`PARAMETER ${name} ${value}`);
   }
@@ -73,20 +90,21 @@ export async function optimizeCommand(
   const hardware = await detectHardware();
   spinner?.succeed("Hardware detected");
 
-  const model = resolveModel(modelArg);
-  if (!model) {
+  const resolved = resolveModel(modelArg);
+  if (!resolved) {
     renderModelNotFound(modelArg, { silent });
     return;
   }
+  spinner?.start("Reading model facts...");
+  const model = await withExactFacts(resolveOllamaHost(), resolved);
+  spinner?.stop();
 
   // Resolve --quant if given; fall back to the sweet spot (with a warning) when
   // the requested name isn't available for this model.
   let forcedQuant: QuantizationVariant | undefined;
   let quantWarning: string | null = null;
   if (options.quant) {
-    const match = model.quantizations.find(
-      (q) => q.name.toLowerCase() === options.quant!.toLowerCase(),
-    );
+    const match = findQuant(model, options.quant);
     if (match) {
       forcedQuant = match;
     } else {
@@ -100,12 +118,18 @@ export async function optimizeCommand(
     return;
   }
 
+  const numCtx = profile.numCtx.value as number;
+  // A num_batch the Modelfile pins also runs as the ubatch (O llm/llama_server.go:630-631).
+  const pinnedBatch = modelfileParams(profile).find(([name]) => name === "num_batch")?.[1];
   const ctx: OptimizeContext = {
     model,
     hardware,
     profile,
     availableVramMb: getAvailableVram(hardware),
     quantWarning,
+    defaultContext: defaultContextFor(model, hardware),
+    kvQ8Max: kvQ8MaxContext(model, profile.quant, hardware, numCtx),
+    memory: memoryBreakdown(model, profile.quant, hardware, numCtx, "f16", pinnedBatch),
   };
 
   if (isJson) {
@@ -141,7 +165,7 @@ function paramLines(profile: OptimizationProfile): string {
 }
 
 function outputTable(ctx: OptimizeContext, verbose: boolean): void {
-  const { model, hardware, profile, availableVramMb, quantWarning } = ctx;
+  const { model, hardware, profile, availableVramMb, quantWarning, defaultContext, kvQ8Max, memory } = ctx;
   const lines: string[] = [];
 
   lines.push("");
@@ -150,11 +174,15 @@ function outputTable(ctx: OptimizeContext, verbose: boolean): void {
   lines.push(sectionHeader("Model"));
   lines.push(keyValue("By", model.provider));
   lines.push(keyValue("Param", `${model.parametersBillion}B`));
-  const quantTag = profile.quantForced ? "(forced)" : "(sweet spot — picked for you)";
+  const quantTag = profile.quantForced
+    ? "(forced)"
+    : profile.quant.exact ? "(the file the tag installs)" : "(sweet spot — picked for you)";
   lines.push(`  ${theme.label("Quant".padEnd(6))}${theme.pass(`★ ${profile.quant.name}`)} ${theme.muted(quantTag)}`);
   if (verbose) {
     lines.push(`  ${theme.label("Fit".padEnd(6))}${fitBadge(profile.fitLevel)}`);
   }
+  // FROM and `ollama run` below load the tag's file, which a forced quant or a sweet spot may not be.
+  lines.push(...pullLines(model, profile.quant));
 
   if (quantWarning) {
     lines.push("");
@@ -162,15 +190,16 @@ function outputTable(ctx: OptimizeContext, verbose: boolean): void {
   }
 
   lines.push(sectionHeader("Your Hardware"));
-  if (hardware.primaryGpu) {
-    lines.push(keyValue("GPU", `${hardware.primaryGpu.model} · ${formatMb(availableVramMb)}`));
-  } else {
-    lines.push(keyValue("GPU", "None — CPU inference"));
-  }
+  lines.push(...gpuRows(hardware, availableVramMb, keyValue("GPU", "None — CPU inference")));
   lines.push(keyValue("CPU", `${hardware.cpu.cores} cores`));
 
   lines.push(sectionHeader("Recommended Parameters"));
   lines.push(paramLines(profile));
+
+  lines.push(sectionHeader("Memory need"));
+  lines.push(`  ${formatNeedAt(memory)}`);
+  lines.push(subLine(formatBreakdown(memory)));
+  lines.push(subLine(formatUsable(memory)));
 
   const modelfile = buildModelfile(profile, model);
   if (modelfile) {
@@ -181,24 +210,35 @@ function outputTable(ctx: OptimizeContext, verbose: boolean): void {
     lines.push(`  ${theme.muted("→")} ${theme.command(`ollama create ${tunedName(model.ollamaTag!)} -f Modelfile`)}`);
 
     lines.push(sectionHeader("Quick (this session)"));
-    lines.push(`  ${theme.muted("→")} ${theme.command(`ollama run ${model.ollamaTag}`)}`);
+    lines.push(`  ${theme.muted("→")} ${theme.command(`ollama run ${runName(model, profile.quant)}`)}`);
     for (const [name, value] of modelfileParams(profile)) {
       lines.push(`    ${theme.command(`/set parameter ${name} ${value}`)}`);
     }
+
+    lines.push(sectionHeader("Server-wide (all models)"));
+    lines.push(`  ${theme.muted("→")} ${theme.command(`OLLAMA_CONTEXT_LENGTH=${profile.numCtx.value} ollama serve`)}`);
+    lines.push(subLine(`Ollama's default context here: ${defaultContext.toLocaleString()} tokens`));
   } else {
     lines.push("");
     lines.push(`  ${theme.muted("Not on Ollama — these apply to any llama.cpp-based runtime.")}`);
   }
 
-  if (hardware.primaryGpu?.acceleratorType === "metal") {
-    lines.push(subLine("(Apple Silicon: unified memory — Ollama offloads all layers)"));
+  // Two lines: one over ~72 visible columns puts boxen in wrap mode, which strips every line's indent.
+  if (kvQ8Max !== null) {
+    lines.push(subLine("Usable memory limits num_ctx; with OLLAMA_FLASH_ATTENTION=1"));
+    lines.push(subLine(`OLLAMA_KV_CACHE_TYPE=q8_0 it affords up to ${kvQ8Max.toLocaleString()} tokens`));
+  }
+
+  const [budgetGpu] = budgetGpus(hardware);
+  if (budgetGpu && isUnifiedMemory(budgetGpu)) {
+    lines.push(subLine("(unified memory — Ollama offloads all layers)"));
   }
 
   console.log(titleBox(lines.join("\n")));
 }
 
 function outputJson(ctx: OptimizeContext): void {
-  const { model, hardware, profile, availableVramMb } = ctx;
+  const { model, hardware, profile, availableVramMb, defaultContext, kvQ8Max, memory } = ctx;
   const param = (p: OptimizedParameter | null) => (p ? { value: p.value, note: p.note } : null);
 
   const output = {
@@ -208,10 +248,12 @@ function outputJson(ctx: OptimizeContext): void {
       provider: model.provider,
       parametersBillion: model.parametersBillion,
       contextWindow: model.contextWindow,
+      contextWindowEstimated: model.contextWindowEstimated === true,
       ollamaTag: model.ollamaTag,
     },
     hardware: {
       gpu: hardware.primaryGpu?.model ?? null,
+      gpuCount: budgetGpus(hardware).length,
       vramMb: availableVramMb,
       cpuCores: hardware.cpu.cores,
     },
@@ -220,6 +262,7 @@ function outputJson(ctx: OptimizeContext): void {
       bitsPerWeight: profile.quant.bitsPerWeight,
       vramMb: profile.quant.vramMb,
       qualityRetention: profile.quant.qualityRetention,
+      qualityMeasured: quantRetention(profile.quant.name).published,
       forced: profile.quantForced,
     },
     fitLevel: profile.fitLevel,
@@ -230,6 +273,9 @@ function outputJson(ctx: OptimizeContext): void {
       num_batch: param(profile.numBatch),
     },
     modelfile: buildModelfile(profile, model),
+    ollamaDefaultContext: defaultContext,
+    kvQ8MaxContext: kvQ8Max,
+    memory,
   };
 
   console.log(JSON.stringify(output, null, 2));
@@ -258,7 +304,8 @@ function renderNoFit(model: ModelEntry, hardware: HardwareProfile, silent: boole
   }
   const lines: string[] = [];
   lines.push("");
-  lines.push(`  ${theme.fail("✗")} No quantization of ${theme.value(model.name)} fits your ${formatMb(availableVramMb)}.`);
+  lines.push(`  ${theme.fail("✗")} No quantization of ${theme.value(model.name)} fits`);
+  lines.push(subLine(`your ${formatUsableMb(availableVramMb, budgetExact(hardware))} of usable memory.`));
   lines.push(`  ${theme.muted("Try:")} ${theme.command(`llm-pulse check ${model.ollamaTag ?? model.id}`)} ${theme.muted("for layer-offload tips")}`);
   lines.push(`  ${theme.muted("Or browse smaller models:")} ${theme.command("llm-pulse models --fits")}`);
   console.log(titleBox(lines.join("\n")));

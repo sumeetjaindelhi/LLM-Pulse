@@ -3,7 +3,8 @@ import si from "systeminformation";
 import { execa } from "execa";
 import { OLLAMA_API_URL, ALERT_THRESHOLDS } from "../core/constants.js";
 import { OllamaPsSchema } from "../core/api-schemas.js";
-import { readRocmGpuStats } from "./gpu.js";
+import { parseSmiInt, readRocmGpuStats } from "./gpu.js";
+import { readAmdSysfsMemory } from "./amd-sysfs.js";
 import { readAppleVramLimit } from "./apple-memory.js";
 import type { SessionStats } from "../core/types.js";
 
@@ -16,6 +17,8 @@ export interface MonitorSnapshot {
   gpuVramTotalMb: number | null;
   gpuPowerWatt: number | null;
   gpuClockMhz: number | null;
+  gpuCount: number | null; // GPUs the vendor tool reports; the figures above are the first one's
+  gpuUnifiedMemory: boolean; // the GPU's pool is system RAM (AMD APU GTT, Apple): free memory is capped by RAM
   ramUsedMb: number;
   ramTotalMb: number;
   ramPercent: number;
@@ -24,7 +27,8 @@ export interface MonitorSnapshot {
   activeModel: string | null;
   tokensPerSec: number | null;
   // Ollama detailed info
-  modelSize: string | null; // e.g. "4.9 GB"
+  modelSize: string | null; // Ollama /api/ps size, e.g. "4.9 GiB"
+  modelVramMb: number | null; // Ollama /api/ps size_vram in MiB: the loaded model's bytes in GPU memory
   modelQuantization: string | null; // e.g. "Q4_K_M"
   modelContextLength: number | null;
   modelMaxContext: number | null;
@@ -147,6 +151,8 @@ export class HardwareMonitor extends EventEmitter {
       gpuVramTotalMb: gpu.vramTotalMb,
       gpuPowerWatt: gpu.powerWatt,
       gpuClockMhz: gpu.clockMhz,
+      gpuCount: gpu.count,
+      gpuUnifiedMemory: gpu.unifiedMemory,
       ramUsedMb: mem.usedMb,
       ramTotalMb: mem.totalMb,
       ramPercent: mem.percent,
@@ -156,6 +162,7 @@ export class HardwareMonitor extends EventEmitter {
       // Kept for output-shape stability; /api/ps has no throughput figure.
       tokensPerSec: null,
       modelSize: ollama.modelSize,
+      modelVramMb: ollama.modelVramMb,
       modelQuantization: ollama.modelQuantization,
       modelContextLength: ollama.contextLength,
       modelMaxContext: ollama.maxContext,
@@ -233,7 +240,7 @@ export class HardwareMonitor extends EventEmitter {
   }
 
   private async pollGpu() {
-    const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null };
+    const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null, count: null, unifiedMemory: false };
 
     if (this.gpuVendor === "AMD") {
       return this.pollGpuAmd();
@@ -250,20 +257,19 @@ export class HardwareMonitor extends EventEmitter {
         "--format=csv,noheader,nounits",
       ], { timeout: 5000 });
       // The monitor tracks a single GPU: the first nvidia-smi row.
-      const parts = stdout.trim().split("\n")[0].split(",").map((s) => s.trim());
-      const percent = parseInt(parts[0], 10);
-      const vramUsedMb = parseInt(parts[2], 10);
-      const vramTotalMb = parseInt(parts[3], 10);
-      if (isNaN(percent) || isNaN(vramUsedMb) || isNaN(vramTotalMb)) {
-        return nullResult;
-      }
+      const rows = stdout.trim().split("\n");
+      const parts = rows[0].split(",").map((s) => s.trim());
+      // Each field is independent: unified-memory GPUs (GB10) print "[N/A]" for
+      // memory but still report utilization and temperature.
       return {
-        percent,
+        percent: parseSmiInt(parts[0]),
         temp: parseInt(parts[1], 10) || null,
-        vramUsedMb,
-        vramTotalMb,
+        vramUsedMb: parseSmiInt(parts[2]),
+        vramTotalMb: parseSmiInt(parts[3]),
         powerWatt: parseFloat(parts[4]) || null,
         clockMhz: parseInt(parts[5], 10) || null,
+        count: rows.length,
+        unifiedMemory: false,
       };
     } catch {
       return nullResult;
@@ -271,19 +277,25 @@ export class HardwareMonitor extends EventEmitter {
   }
 
   private async pollGpuAmd() {
-    const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null };
+    const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null, count: null, unifiedMemory: false };
     try {
       // The monitor tracks a single GPU: card 0.
-      const [stats] = await readRocmGpuStats();
+      const cards = await readRocmGpuStats();
+      const [stats] = cards;
       if (!stats || stats.vramTotalMb === 0) return nullResult;
+      // On an APU rocm-smi only sees the BIOS carve-out; the real pool is GTT.
+      const [sysfs] = await readAmdSysfsMemory();
+      const apu = sysfs?.apu ?? null;
 
       return {
         percent: stats.utilizationPercent || null,
         temp: stats.temperatureCelsius || null,
-        vramUsedMb: stats.vramUsedMb,
-        vramTotalMb: stats.vramTotalMb,
+        vramUsedMb: apu?.gttUsedMb ?? stats.vramUsedMb,
+        vramTotalMb: apu?.gttTotalMb ?? stats.vramTotalMb,
         powerWatt: null,
         clockMhz: null,
+        count: cards.length,
+        unifiedMemory: apu !== null,
       };
     } catch {
       return nullResult;
@@ -305,7 +317,7 @@ export class HardwareMonitor extends EventEmitter {
    * null for what we can't read (honest "unknown") rather than guess.
    */
   private async pollGpuApple() {
-    const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null };
+    const nullResult = { percent: null, temp: null, vramUsedMb: null, vramTotalMb: null, powerWatt: null, clockMhz: null, count: null, unifiedMemory: false };
     try {
       const { stdout } = await execa(
         "ioreg",
@@ -313,7 +325,8 @@ export class HardwareMonitor extends EventEmitter {
         { timeout: 3000 },
       );
       const statsMatch = stdout.match(/"PerformanceStatistics"\s*=\s*\{([\s\S]*?)\}/);
-      if (!statsMatch) return { ...nullResult, vramTotalMb: this.appleVramTotalMb };
+      const apple = { count: 1, unifiedMemory: true };
+      if (!statsMatch) return { ...nullResult, ...apple, vramTotalMb: this.appleVramTotalMb };
       const block = statsMatch[1];
       const readNum = (pattern: RegExp): number | null => {
         const m = block.match(pattern);
@@ -335,9 +348,10 @@ export class HardwareMonitor extends EventEmitter {
         vramTotalMb: this.appleVramTotalMb,
         powerWatt: null,
         clockMhz: null,
+        ...apple,
       };
     } catch {
-      return { ...nullResult, vramTotalMb: this.appleVramTotalMb };
+      return { ...nullResult, count: 1, unifiedMemory: true, vramTotalMb: this.appleVramTotalMb };
     }
   }
 
@@ -351,6 +365,7 @@ export class HardwareMonitor extends EventEmitter {
         return {
           model: null,
           modelSize: null,
+          modelVramMb: null,
           modelQuantization: null,
           contextLength: null,
           maxContext: null,
@@ -362,19 +377,21 @@ export class HardwareMonitor extends EventEmitter {
         return {
           model: null,
           modelSize: null,
+          modelVramMb: null,
           modelQuantization: null,
           contextLength: null,
           maxContext: null,
         };
 
       const active = data.models[0];
-      const sizeGb = active.size
-        ? `${(active.size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+      const sizeGib = active.size
+        ? `${(active.size / (1024 * 1024 * 1024)).toFixed(1)} GiB`
         : null;
 
       return {
         model: active.name,
-        modelSize: sizeGb,
+        modelSize: sizeGib,
+        modelVramMb: active.size_vram ? Math.round(active.size_vram / (1024 * 1024)) : null,
         modelQuantization: active.details?.quantization_level ?? null,
         contextLength: active.context_length ?? null,
         maxContext: null,
@@ -383,6 +400,7 @@ export class HardwareMonitor extends EventEmitter {
       return {
         model: null,
         modelSize: null,
+        modelVramMb: null,
         modelQuantization: null,
         contextLength: null,
         maxContext: null,

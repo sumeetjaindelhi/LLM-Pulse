@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { scoreModel, deriveVerdict, suggestGpuOffload } from "../../src/analysis/scorer.js";
-import { resolveModel, getModelById, searchModels } from "../../src/models/database.js";
-import type { HardwareProfile, FitLevel } from "../../src/core/types.js";
+import { resolveModel, getModelById, searchModels, findQuant } from "../../src/models/database.js";
+import type { HardwareProfile, FitLevel, ModelEntry } from "../../src/core/types.js";
 import highEnd from "../fixtures/hardware-profiles/high-end-nvidia.json";
 import cpuOnly from "../fixtures/hardware-profiles/cpu-only.json";
 import appleM2 from "../fixtures/hardware-profiles/apple-m2.json";
@@ -113,6 +113,17 @@ describe("suggestGpuOffload", () => {
     expect(suggestion!.ollamaCommand).toContain("/set parameter num_gpu");
   });
 
+  // `ollama run llama3.1:70b` loads Q4_K_M, the file the tag installs: layer counts sized for another quant would
+  // overcommit or waste VRAM there, so no command comes with them.
+  it("gives no Ollama command for a quant the tag does not install", () => {
+    const small = getModelById("llama-3.1-8b")!;
+    const f16 = small.quantizations.find((q) => q.name === "F16")!;
+    expect(suggestGpuOffload(small, f16, highEnd as HardwareProfile)).toMatchObject({ reason: "full_fit", ollamaCommand: null });
+    const big = getModelById("llama-3.1-70b")!;
+    const q5 = big.quantizations.find((q) => q.name === "Q5_K_M")!;
+    expect(suggestGpuOffload(big, q5, highEnd as HardwareProfile)).toMatchObject({ reason: "partial_offload", ollamaCommand: null });
+  });
+
   it("returns null on Apple Silicon (unified memory — no offload split)", () => {
     const model = getModelById("llama-3.1-8b")!;
     const quant = model.quantizations[0];
@@ -174,5 +185,25 @@ describe("model resolution", () => {
     expect(coding.length).toBeGreaterThan(0);
     expect(coding.length).toBeLessThan(all.length);
     expect(coding.every((m) => m.categories.includes("coding"))).toBe(true);
+  });
+});
+
+describe("findQuant", () => {
+  const row = (source: ModelEntry["source"], names: string[]): ModelEntry => ({
+    ...getModelById("llama-3.1-8b")!,
+    source,
+    quantizations: names.map((name) => ({ name, bitsPerWeight: 5, vramMb: 1000, qualityRetention: 0.97 })),
+  });
+
+  it("matches a quant name in any case", () => {
+    expect(findQuant(row("curated", ["Q4_K_M", "Q8_0"]), "q8_0")?.name).toBe("Q8_0");
+    expect(findQuant(row("curated", ["Q4_K_M", "Q8_0"]), "Q9_Z")).toBeUndefined();
+  });
+
+  // scan and models never look up exact facts, so they list a library row's sole quant as "default" (or "ternary").
+  it("matches a library row's sole quant by its placeholder name after exact facts renamed it", () => {
+    expect(findQuant(row("library", ["F16"]), "default")?.name).toBe("F16");
+    expect(findQuant(row("library", ["TQ1_0"]), "Ternary")?.name).toBe("TQ1_0");
+    expect(findQuant(row("curated", ["F16"]), "default")).toBeUndefined();
   });
 });
