@@ -15,7 +15,7 @@ const safeString = z.string().max(256);
  * their own shell regardless. The MCP surface is where outside instructions
  * (from whatever client has connected) reach the fetch layer.
  */
-export const LocalhostUrl = z.string().url().refine(
+export const LocalhostUrl = z.url().refine(
   (url) => {
     try {
       const u = new URL(url);
@@ -30,7 +30,7 @@ export const LocalhostUrl = z.string().url().refine(
       return false;
     }
   },
-  { message: "host must point to localhost (localhost, 127.0.0.1, or ::1)" },
+  { error: "host must point to localhost (localhost, 127.0.0.1, or ::1)" },
 );
 
 // Ollama lists cloud-hosted models (`ollama run kimi-k3:cloud`) beside local ones and marks them with
@@ -158,7 +158,7 @@ export const ArchFactsSchema = z.object({
   inexactReason: safeString.optional(),
 }).refine(
   (a) => [a.headCountKv, a.recurrentLayers, a.slidingWindowPattern].every((v) => !Array.isArray(v) || v.length === a.layers),
-  { message: "per-layer arrays must have one entry per layer" },
+  { error: "per-layer arrays must have one entry per layer" },
 );
 
 // Exact model facts from the registry (src/models/ollama-registry.ts), as cached on disk. Entries from older versions

@@ -13,13 +13,13 @@ export const OUTPUT_FORMATS = ["table", "json", "csv"] as const;
 export const CATEGORY_FILTERS = ["general", "coding", "reasoning", "creative", "multilingual", "all"] as const;
 
 const ConfigSchema = z.object({
-  ollamaHost: z.string().url().optional(),
-  lmstudioHost: z.string().url().optional(),
+  ollamaHost: z.url().optional(),
+  lmstudioHost: z.url().optional(),
   defaultFormat: z.enum(OUTPUT_FORMATS).optional(),
   defaultCategory: z.enum(CATEGORY_FILTERS).optional(),
   defaultTop: z.number().int().min(1).max(50).optional(),
   offline: z.boolean().optional(),
-}).passthrough();
+}).loose();
 
 export type LlmPulseConfig = z.infer<typeof ConfigSchema>;
 

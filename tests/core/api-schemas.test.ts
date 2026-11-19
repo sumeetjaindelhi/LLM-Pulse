@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { OllamaTagsSchema, OllamaPickModelSchema } from "../../src/core/api-schemas.js";
+import { ArchFactsSchema, LocalhostUrl, OllamaTagsSchema, OllamaPickModelSchema } from "../../src/core/api-schemas.js";
+
+describe("schema error messages", () => {
+  const issue = (result: { error?: { issues: { message: string }[] } }) => result.error?.issues[0]?.message;
+
+  it("LocalhostUrl rejects a remote host with its own message", () => {
+    expect(issue(LocalhostUrl.safeParse("http://example.com:11434"))).toBe("host must point to localhost (localhost, 127.0.0.1, or ::1)");
+  });
+
+  it("ArchFactsSchema rejects a per-layer array of the wrong length with its own message", () => {
+    const arch = { architecture: "llama", layers: 2, headCountKv: [8], keyLength: 128, valueLength: 128 };
+    expect(issue(ArchFactsSchema.safeParse(arch))).toBe("per-layer arrays must have one entry per layer");
+  });
+});
 
 const local = { name: "llama3.1:8b", size: 4_900_000_000 };
 const cloudByHost = { name: "kimi-k3:cloud", size: 0, remote_host: "https://ollama.com:443", remote_model: "kimi-k3" };

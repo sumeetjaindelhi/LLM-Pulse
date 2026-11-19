@@ -1,6 +1,6 @@
 {
   "name": "llm-pulse",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Zero-config CLI for monitoring your local LLM hardware, runtimes, and model compatibility",
   "type": "module",
   "main": "dist/src/index.js",
@@ -55,7 +55,7 @@
     "url": "https://github.com/sumeetjaindelhi/LLM-Pulse/issues"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "boxen": "^8.0.1",
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
@@ -64,14 +64,14 @@
     "ink": "^6.8.0",
     "ora": "^8.2.0",
     "react": "^19.2.4",
-    "systeminformation": "^5.24.6",
-    "zod": "^3.24.2"
+    "systeminformation": "^5.33.23",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.13.9",
     "@types/react": "^19.2.14",
     "typescript": "^5.8.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "engines": {
     "node": ">=20.5.0"

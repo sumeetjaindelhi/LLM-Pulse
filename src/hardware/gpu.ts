@@ -77,7 +77,7 @@ const RocmJsonGpu = z
     "Temperature (Sensor junction) (C)": z.string().optional(),
     "Temperature (C)": z.string().optional(),
   })
-  .passthrough();
+  .loose();
 const RocmJsonSchema = z.record(z.string(), RocmJsonGpu);
 
 function pickBytesToMb(values: (string | undefined)[]): number {

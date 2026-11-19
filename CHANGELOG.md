@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Releases before `1.0.0` predate this changelog and were not consistently
 > git-tagged, so their dates are omitted rather than reconstructed.
 
+## [1.2.1] - 2026-11-19
+
+1.2.0 was tagged but never published to npm, so 1.2.1 is the first npm
+release carrying the 1.2.0 changes below, plus these dependency updates.
+
+### Security
+- Dependency floors raised past newly published advisories:
+  - `@modelcontextprotocol/sdk` ^1.32.2: OAuth, session-binding and HTTP
+    request-size advisories. The llm-pulse MCP server uses only the stdio
+    transport.
+  - `systeminformation` ^5.33.23: `networkStats()` and `services()`
+    advisories. llm-pulse calls neither.
+  - `zod` ^4.6.7: memory exhaustion while validating oversized constrained
+    collections. The fix exists only in zod 4.
+- `npm audit fix` refreshed the lockfile's transitive dependencies, and
+  vitest is now 4.1.12 (dev only). `npm audit` reports 0 vulnerabilities.
+
+### Changed
+- Zod 4: the schemas use `z.url()`, `.loose()` and `error:` where zod 4
+  deprecates `.url()` on strings, `.passthrough()` and `message:`. Validation
+  rules and error messages are unchanged. The exported `LlmPulseConfig` type
+  keeps its shape; it now resolves through zod 4's types, which support
+  TypeScript 5.5 and later.
+
 ## [1.2.0] - 2026-11-18
 
 Every memory figure is now exact (read from the model file or measured on your
